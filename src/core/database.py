@@ -1,6 +1,7 @@
 import sqlite3
 from datetime import datetime
 from pathlib import Path
+from threading import Lock
 from typing import Any, Optional
 
 
@@ -16,6 +17,10 @@ class Database:
 
         self.conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row  # Return rows as dictionaries
+
+        # Thread safety lock for write operations
+        self._write_lock = Lock()
+
         self.create_tables()
 
     def create_tables(self):
@@ -67,6 +72,12 @@ class Database:
             ON activities(project_id)
         ''')
 
+        # Create unique index to prevent duplicate activities
+        cursor.execute('''
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_activity
+            ON activities(timestamp, app_name, window_title, duration)
+        ''')
+
         self.conn.commit()
         cursor.close()
 
@@ -82,17 +93,24 @@ class Database:
         """Save a tracked activity to the database"""
         duration = int((end_time - start_time).total_seconds())
 
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            INSERT INTO activities (timestamp, app_name, window_title, duration, is_idle, process_path)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (start_time, app_name, window_title, duration, is_idle, process_path))
+        with self._write_lock:
+            cursor = self.conn.cursor()
+            try:
+                cursor.execute('''
+                    INSERT INTO activities (timestamp, app_name, window_title, duration, is_idle, process_path)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (start_time, app_name, window_title, duration, is_idle, process_path))
 
-        activity_id = cursor.lastrowid
-        self.conn.commit()
-        cursor.close()
+                activity_id = cursor.lastrowid
+                self.conn.commit()
+                cursor.close()
 
-        return int(activity_id) if activity_id else 0
+                return int(activity_id) if activity_id else 0
+
+            except sqlite3.IntegrityError:
+                # Duplicate activity - silently ignore
+                cursor.close()
+                return 0
 
     def get_activities(
         self,
@@ -136,15 +154,16 @@ class Database:
 
     def create_project(self, name: str, color: str = "#3498db") -> int:
         """Create a new project"""
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            INSERT INTO projects (name, color)
-            VALUES (?, ?)
-        ''', (name, color))
+        with self._write_lock:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                INSERT INTO projects (name, color)
+                VALUES (?, ?)
+            ''', (name, color))
 
-        project_id = cursor.lastrowid
-        self.conn.commit()
-        cursor.close()
+            project_id = cursor.lastrowid
+            self.conn.commit()
+            cursor.close()
 
         return int(project_id) if project_id else 0
 
@@ -159,32 +178,51 @@ class Database:
 
     def assign_activity_to_project(self, activity_id: int, project_id: int) -> None:
         """Assign an activity to a project"""
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            UPDATE activities
-            SET project_id = ?
-            WHERE id = ?
-        ''', (project_id, activity_id))
+        with self._write_lock:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                UPDATE activities
+                SET project_id = ?
+                WHERE id = ?
+            ''', (project_id, activity_id))
 
-        self.conn.commit()
-        cursor.close()
+            self.conn.commit()
+            cursor.close()
+
+    def assign_multiple_activities_to_project(self, activity_ids: list[int], project_id: int) -> int:
+        """Assign multiple activities to a project"""
+        with self._write_lock:
+            cursor = self.conn.cursor()
+            placeholders = ','.join('?' * len(activity_ids))
+            cursor.execute(f'''
+                UPDATE activities
+                SET project_id = ?
+                WHERE id IN ({placeholders})
+            ''', [project_id] + activity_ids)
+
+            rows_affected = cursor.rowcount
+            self.conn.commit()
+            cursor.close()
+
+        return rows_affected
 
     def assign_activities_by_timerange(
         self, start_time: datetime, end_time: datetime, app_name: str, project_id: int
     ) -> int:
         """Assign all activities in a time range for a specific app to a project"""
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            UPDATE activities
-            SET project_id = ?
-            WHERE timestamp >= ?
-              AND timestamp <= ?
-              AND app_name = ?
-        ''', (project_id, start_time, end_time, app_name))
+        with self._write_lock:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                UPDATE activities
+                SET project_id = ?
+                WHERE timestamp >= ?
+                  AND timestamp <= ?
+                  AND app_name = ?
+            ''', (project_id, start_time, end_time, app_name))
 
-        rows_affected = cursor.rowcount
-        self.conn.commit()
-        cursor.close()
+            rows_affected = cursor.rowcount
+            self.conn.commit()
+            cursor.close()
 
         return rows_affected
 
@@ -199,14 +237,15 @@ class Database:
 
     def set_setting(self, key: str, value: str) -> None:
         """Set a setting value"""
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            INSERT OR REPLACE INTO settings (key, value)
-            VALUES (?, ?)
-        ''', (key, value))
+        with self._write_lock:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO settings (key, value)
+                VALUES (?, ?)
+            ''', (key, value))
 
-        self.conn.commit()
-        cursor.close()
+            self.conn.commit()
+            cursor.close()
 
     def close(self) -> None:
         """Close database connection"""

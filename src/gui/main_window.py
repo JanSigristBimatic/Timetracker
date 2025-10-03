@@ -730,11 +730,20 @@ class MainWindow(QMainWindow):
         # Get selected filters
         selected_project = self.project_filter.currentData()
 
-        activities = self.database.get_activities(
-            start_date=start_datetime,
-            end_date=end_datetime,
-            project_id=selected_project,
-        )
+        # Handle "Ohne Projekt" filter
+        if selected_project == "NO_PROJECT":
+            activities = self.database.get_activities(
+                start_date=start_datetime,
+                end_date=end_datetime,
+            )
+            # Filter to only activities without project
+            activities = [a for a in activities if a.get("project_id") is None]
+        else:
+            activities = self.database.get_activities(
+                start_date=start_datetime,
+                end_date=end_datetime,
+                project_id=selected_project,
+            )
 
         # Apply app filter
         selected_app = self.app_filter.currentData()
@@ -854,6 +863,7 @@ class MainWindow(QMainWindow):
         self.project_filter.blockSignals(True)
         self.project_filter.clear()
         self.project_filter.addItem("Alle", None)
+        self.project_filter.addItem("Ohne Projekt", "NO_PROJECT")
         for project in projects:
             self.project_filter.addItem(project["name"], project["id"])
 

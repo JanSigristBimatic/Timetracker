@@ -1,5 +1,7 @@
 import sys
+from pathlib import Path
 
+from dotenv import load_dotenv
 from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
@@ -7,6 +9,10 @@ from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 from core.database import Database
 from core.tracker import ActivityTracker
 from gui.main_window import MainWindow
+
+# Load environment variables from .env file
+env_path = Path(__file__).parent.parent / '.env'
+load_dotenv(env_path)
 
 
 class TimeTrackerApp:

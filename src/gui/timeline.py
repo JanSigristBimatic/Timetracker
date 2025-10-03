@@ -82,6 +82,10 @@ class TimelineWidget(QWidget):
         # Track activity rectangles for click detection
         self.activity_rects = []
 
+        # Track selected activities for multi-selection
+        self.selected_activities = []
+        self.last_clicked_activity = None  # Track last clicked for shift-selection
+
         self.setMinimumHeight(24 * self.hour_height + 2 * self.top_margin)
         self.setMouseTracking(True)
         self.setToolTip("")  # Enable tooltips
@@ -285,8 +289,11 @@ class TimelineWidget(QWidget):
             # Draw activity block
             painter.fillRect(rect, color)
 
-            # Draw border
-            painter.setPen(QPen(QColor(255, 255, 255), 1))
+            # Draw border (thicker if selected)
+            if activity in self.selected_activities:
+                painter.setPen(QPen(QColor(255, 215, 0), 3))  # Gold border for selected
+            else:
+                painter.setPen(QPen(QColor(255, 255, 255), 1))
             painter.drawRect(rect)
 
             # Store rect for click detection
@@ -394,7 +401,58 @@ class TimelineWidget(QWidget):
 
     def mousePressEvent(self, event):
         """Handle mouse clicks"""
-        if event.button() == Qt.MouseButton.RightButton:
+        if event.button() == Qt.MouseButton.LeftButton:
+            # Find clicked activity
+            for rect, activity in self.activity_rects:
+                if rect.contains(event.pos()):
+                    # Range selection with Shift
+                    if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                        if self.last_clicked_activity and self.last_clicked_activity in [a for _, a in self.activity_rects]:
+                            # Find indices of last and current activities
+                            activities_list = [a for _, a in self.activity_rects]
+                            try:
+                                last_idx = activities_list.index(self.last_clicked_activity)
+                                current_idx = activities_list.index(activity)
+
+                                # Select all activities in range
+                                start_idx = min(last_idx, current_idx)
+                                end_idx = max(last_idx, current_idx)
+
+                                # Add all activities in range to selection
+                                for idx in range(start_idx, end_idx + 1):
+                                    if activities_list[idx] not in self.selected_activities:
+                                        self.selected_activities.append(activities_list[idx])
+                            except ValueError:
+                                pass  # Activity not found in list
+                        else:
+                            # No last activity - just select current
+                            if activity not in self.selected_activities:
+                                self.selected_activities.append(activity)
+
+                        self.last_clicked_activity = activity
+                        self.update()
+                    # Toggle selection with Ctrl
+                    elif event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                        if activity in self.selected_activities:
+                            self.selected_activities.remove(activity)
+                        else:
+                            self.selected_activities.append(activity)
+                        self.last_clicked_activity = activity
+                        self.update()
+                    else:
+                        # Single click without modifiers - select only this one
+                        self.selected_activities = [activity]
+                        self.last_clicked_activity = activity
+                        self.update()
+                    return
+
+            # Clicked on empty space - clear selection
+            if not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
+                self.selected_activities = []
+                self.last_clicked_activity = None
+                self.update()
+
+        elif event.button() == Qt.MouseButton.RightButton:
             # Find clicked activity
             for rect, activity in self.activity_rects:
                 if rect.contains(event.pos()):
@@ -408,22 +466,33 @@ class TimelineWidget(QWidget):
         # Get all projects
         projects = self.database.get_projects()
 
+        # Determine if we're working with multiple activities
+        activities_to_assign = self.selected_activities if self.selected_activities else [activity]
+        is_multi = len(activities_to_assign) > 1
+
         if projects:
+            if is_multi:
+                menu.addSection(f"{len(activities_to_assign)} Aktivitäten zuordnen zu:")
+
             for project in projects:
-                action = QAction(f"→ {project['name']}", self)
+                label = f"→ {project['name']}"
+                if is_multi:
+                    label = f"   {project['name']}"
+                action = QAction(label, self)
                 action.triggered.connect(
-                    lambda checked, act=activity, pid=project['id']:
-                    self.assign_to_project(act, pid)
+                    lambda checked, acts=activities_to_assign, pid=project['id']:
+                    self.assign_multiple_to_project(acts, pid)
                 )
                 menu.addAction(action)
 
             menu.addSeparator()
 
         # Clear project assignment
-        if activity.get('project_id'):
-            clear_action = QAction("Projektzuordnung entfernen", self)
+        if any(act.get('project_id') for act in activities_to_assign):
+            clear_label = "Projektzuordnungen entfernen" if is_multi else "Projektzuordnung entfernen"
+            clear_action = QAction(clear_label, self)
             clear_action.triggered.connect(
-                lambda: self.assign_to_project(activity, None)
+                lambda: self.assign_multiple_to_project(activities_to_assign, None)
             )
             menu.addAction(clear_action)
 
@@ -442,6 +511,38 @@ class TimelineWidget(QWidget):
         )
 
         print(f"Assigned {count} activities to project")
+
+        # Clear selection
+        self.selected_activities = []
+
+        # Find main window and refresh
+        widget = self
+        while widget is not None:
+            if hasattr(widget, 'load_timeline'):
+                widget.load_timeline()
+                break
+            widget = widget.parent()
+
+    def assign_multiple_to_project(self, activities, project_id):
+        """Assign multiple activities to a project"""
+        total_count = 0
+
+        for activity in activities:
+            # Use the merged activity's time range to assign ALL activities in that range
+            start_time = activity['timestamp']
+            end_time = activity.get('end_time', start_time + timedelta(seconds=activity['duration']))
+            app_name = activity['app_name']
+
+            # Assign all activities in this time range for this app
+            count = self.database.assign_activities_by_timerange(
+                start_time, end_time, app_name, project_id
+            )
+            total_count += count
+
+        print(f"Assigned {total_count} activities to project")
+
+        # Clear selection
+        self.selected_activities = []
 
         # Find main window and refresh
         widget = self

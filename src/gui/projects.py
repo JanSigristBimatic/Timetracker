@@ -135,7 +135,7 @@ class ProjectManagerDialog(QDialog):
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 cursor = self.database.conn.cursor()
-                cursor.execute('DELETE FROM projects WHERE id = %s', (project_id,))
+                cursor.execute('DELETE FROM projects WHERE id = ?', (project_id,))
                 self.database.conn.commit()
                 cursor.close()
                 self.load_projects()
