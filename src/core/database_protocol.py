@@ -133,6 +133,15 @@ class DatabaseProtocol(Protocol):
         """
         ...
 
+    def get_social_media_project_id(self) -> Optional[int]:
+        """
+        Get the ID of the Social Media project
+
+        Returns:
+            The ID of the Social Media project or None if it doesn't exist
+        """
+        ...
+
     def close(self) -> None:
         """Close database connection"""
         ...

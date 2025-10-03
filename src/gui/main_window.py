@@ -761,14 +761,22 @@ class MainWindow(QMainWindow):
 
     def update_stats(self, activities):
         """Update statistics display"""
-        if not activities:
+        # Get ALL activities for the day for correct total time
+        start_datetime = datetime.combine(self.current_date, datetime.min.time())
+        end_datetime = datetime.combine(self.current_date, datetime.max.time())
+        all_activities = self.database.get_activities(
+            start_date=start_datetime, end_date=end_datetime
+        )
+
+        if not all_activities:
             self.stats_label.setText("Keine Aktivitäten für diesen Tag")
             return
 
-        total_seconds = sum(activity["duration"] for activity in activities)
+        # Calculate total from all activities
+        total_seconds = sum(activity["duration"] for activity in all_activities)
         active_seconds = sum(
             activity["duration"]
-            for activity in activities
+            for activity in all_activities
             if not activity.get("is_idle", False)
         )
 
@@ -776,11 +784,16 @@ class MainWindow(QMainWindow):
         active_hours = active_seconds / 3600
         idle_hours = (total_seconds - active_seconds) / 3600
 
+        # Show filtered count if filter is active
+        filter_info = ""
+        if len(activities) < len(all_activities):
+            filter_info = f" (Filter: {len(activities)} Aktivitäten)"
+
         stats_text = (
             f"Gesamt: {total_hours:.1f}h | "
             f"Aktiv: {active_hours:.1f}h | "
             f"Idle: {idle_hours:.1f}h | "
-            f"Aktivitäten: {len(activities)}"
+            f"Aktivitäten: {len(all_activities)}{filter_info}"
         )
 
         self.stats_label.setText(stats_text)

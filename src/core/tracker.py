@@ -5,6 +5,7 @@ from threading import Event, Thread
 
 from core.database_protocol import DatabaseProtocol
 from utils.config import should_ignore_activity
+from utils.social_media_detector import SocialMediaDetector
 
 
 class ActivityTracker:
@@ -124,7 +125,7 @@ class ActivityTracker:
 
         # Only save if duration is at least 1 second
         if (end_time - self.start_time).total_seconds() >= 1:
-            self.database.save_activity(
+            activity_id = self.database.save_activity(
                 app_name=self.current_activity['app_name'],
                 window_title=self.current_activity['window_title'],
                 start_time=self.start_time,
@@ -132,6 +133,17 @@ class ActivityTracker:
                 is_idle=is_idle,
                 process_path=self.current_activity.get('process_path')
             )
+
+            # Auto-assign to Social Media project if detected
+            if activity_id and SocialMediaDetector.is_social_media(
+                self.current_activity['app_name'],
+                self.current_activity['window_title']
+            ):
+                social_media_project_id = self.database.get_social_media_project_id()
+                if social_media_project_id:
+                    self.database.assign_activity_to_project(
+                        activity_id, social_media_project_id
+                    )
 
     def get_current_activity(self):
         """Get the current activity being tracked"""

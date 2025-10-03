@@ -81,6 +81,9 @@ class Database:
         self.conn.commit()
         cursor.close()
 
+        # Initialize Social Media project if it doesn't exist
+        self._initialize_social_media_project()
+
     def save_activity(
         self,
         app_name: str,
@@ -96,6 +99,37 @@ class Database:
         with self._write_lock:
             cursor = self.conn.cursor()
             try:
+                # Check for overlapping activities
+                cursor.execute('''
+                    SELECT id, timestamp, duration
+                    FROM activities
+                    WHERE timestamp < ?
+                      AND datetime(timestamp, '+' || duration || ' seconds') > ?
+                ''', (end_time, start_time))
+
+                overlapping = cursor.fetchall()
+
+                if overlapping:
+                    # Shorten overlapping activities to prevent overlap
+                    for overlap in overlapping:
+                        overlap_id = overlap[0]
+                        overlap_start = datetime.fromisoformat(overlap[1]) if isinstance(overlap[1], str) else overlap[1]
+                        overlap_duration = overlap[2]
+
+                        # Calculate new duration to end when this activity starts
+                        new_duration = int((start_time - overlap_start).total_seconds())
+
+                        if new_duration > 0:
+                            cursor.execute('''
+                                UPDATE activities
+                                SET duration = ?
+                                WHERE id = ?
+                            ''', (new_duration, overlap_id))
+                        else:
+                            # Would result in 0 duration - delete it
+                            cursor.execute('DELETE FROM activities WHERE id = ?', (overlap_id,))
+
+                # Insert new activity
                 cursor.execute('''
                     INSERT INTO activities (timestamp, app_name, window_title, duration, is_idle, process_path)
                     VALUES (?, ?, ?, ?, ?, ?)
@@ -246,6 +280,32 @@ class Database:
 
             self.conn.commit()
             cursor.close()
+
+    def _initialize_social_media_project(self) -> None:
+        """Initialize the Social Media project if it doesn't exist"""
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT id FROM projects WHERE name = ?', ('Social Media',))
+        result = cursor.fetchone()
+
+        if not result:
+            # Create Social Media project with a distinctive color
+            with self._write_lock:
+                cursor.execute('''
+                    INSERT INTO projects (name, color)
+                    VALUES (?, ?)
+                ''', ('Social Media', '#e74c3c'))
+                self.conn.commit()
+
+        cursor.close()
+
+    def get_social_media_project_id(self) -> Optional[int]:
+        """Get the ID of the Social Media project"""
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT id FROM projects WHERE name = ?', ('Social Media',))
+        result = cursor.fetchone()
+        cursor.close()
+
+        return result[0] if result else None
 
     def close(self) -> None:
         """Close database connection"""
