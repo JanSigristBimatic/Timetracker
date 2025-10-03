@@ -1,0 +1,450 @@
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QMenu
+from PyQt6.QtCore import Qt, QRect, QPoint
+from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QAction
+from datetime import datetime, timedelta
+from utils.config import should_ignore_activity
+
+
+class TimelineWidget(QWidget):
+    """Widget to display activity timeline"""
+
+    def __init__(self, database):
+        super().__init__()
+        self.database = database
+        self.activities = []
+        self.current_date = datetime.now().date()
+
+        # Visual settings
+        self.hour_height = 60  # pixels per hour (adjustable via zoom)
+        self.left_margin = 60
+        self.right_margin = 20
+        self.top_margin = 20
+
+        # Colors
+        self.colors = {
+            'active': QColor(52, 152, 219),  # Blue
+            'idle': QColor(149, 165, 166),   # Gray
+            'background': QColor(255, 255, 255),
+            'grid': QColor(236, 240, 241),
+            'text': QColor(44, 62, 80)
+        }
+
+        # Color palette for different apps
+        self.app_colors = {}
+
+        # Predefined color palette for better distinction (30 colors)
+        self.color_palette = [
+            QColor(52, 152, 219),   # Blue
+            QColor(46, 204, 113),   # Green
+            QColor(155, 89, 182),   # Purple
+            QColor(241, 196, 15),   # Yellow
+            QColor(230, 126, 34),   # Orange
+            QColor(231, 76, 60),    # Red
+            QColor(26, 188, 156),   # Turquoise
+            QColor(52, 73, 94),     # Dark Blue
+            QColor(22, 160, 133),   # Sea Green
+            QColor(243, 156, 18),   # Bright Orange
+            QColor(211, 84, 0),     # Dark Orange
+            QColor(192, 57, 43),    # Dark Red
+            QColor(142, 68, 173),   # Dark Purple
+            QColor(41, 128, 185),   # Ocean Blue
+            QColor(39, 174, 96),    # Emerald
+            QColor(127, 140, 141),  # Gray
+            QColor(44, 62, 80),     # Midnight Blue
+            QColor(149, 165, 166),  # Silver
+            QColor(236, 240, 241),  # Clouds (darker for visibility)
+            QColor(189, 195, 199),  # Concrete
+            QColor(255, 118, 117),  # Light Red
+            QColor(253, 203, 110),  # Light Orange
+            QColor(162, 155, 254),  # Light Purple
+            QColor(116, 185, 255),  # Light Blue
+            QColor(9, 132, 227),    # Dodger Blue
+            QColor(108, 92, 231),   # Blue Violet
+            QColor(255, 159, 243),  # Pink
+            QColor(85, 239, 196),   # Aqua
+            QColor(0, 184, 148),    # Green Sea
+            QColor(255, 234, 167),  # Light Yellow
+        ]
+
+        # Track activity rectangles for click detection
+        self.activity_rects = []
+
+        self.setMinimumHeight(24 * self.hour_height + 2 * self.top_margin)
+        self.setMouseTracking(True)
+        self.setToolTip("")  # Enable tooltips
+
+    def set_activities(self, activities, date):
+        """Set activities to display"""
+        # Filter out ignored processes
+        filtered = [
+            act for act in activities
+            if not should_ignore_activity(act['app_name'], act.get('window_title', ''))
+        ]
+
+        # Merge consecutive activities from the same app
+        self.activities = self._merge_activities(filtered)
+        self.current_date = date
+        print(f"Timeline: Loading {len(activities)} activities for {date}")
+        print(f"Timeline: After filtering: {len(filtered)} activities")
+        print(f"Timeline: After merging: {len(self.activities)} activities")
+        if self.activities:
+            print(f"  First activity: {self.activities[0]['timestamp']} - {self.activities[0]['app_name']}")
+        self.update()
+
+    def _merge_activities(self, activities):
+        """Merge consecutive activities from the same app"""
+        if not activities:
+            return []
+
+        # Sort by timestamp (oldest first for merging)
+        sorted_activities = sorted(activities, key=lambda x: x['timestamp'])
+
+        merged = []
+        current = None
+
+        for activity in sorted_activities:
+            if current is None:
+                # First activity
+                current = activity.copy()
+                current['end_time'] = current['timestamp'] + timedelta(seconds=current['duration'])
+            elif (current['app_name'] == activity['app_name'] and
+                  not current.get('is_idle', False) and
+                  not activity.get('is_idle', False)):
+                # Same app, merge them
+                activity_end = activity['timestamp'] + timedelta(seconds=activity['duration'])
+
+                # Check if activities are close enough (within 5 seconds gap)
+                gap = (activity['timestamp'] - current['end_time']).total_seconds()
+                if gap <= 5:
+                    # Extend current activity
+                    current['end_time'] = activity_end
+                    current['duration'] = int((current['end_time'] - current['timestamp']).total_seconds())
+                    # Keep the most recent window title
+                    if activity['window_title']:
+                        current['window_title'] = activity['window_title']
+                else:
+                    # Gap too large, save current and start new
+                    merged.append(current)
+                    current = activity.copy()
+                    current['end_time'] = current['timestamp'] + timedelta(seconds=current['duration'])
+            else:
+                # Different app or idle, save current and start new
+                merged.append(current)
+                current = activity.copy()
+                current['end_time'] = current['timestamp'] + timedelta(seconds=current['duration'])
+
+        # Don't forget the last one
+        if current:
+            merged.append(current)
+
+        return merged
+
+    def set_zoom(self, hour_height):
+        """Set zoom level (pixels per hour)"""
+        self.hour_height = hour_height
+        self.setMinimumHeight(24 * self.hour_height + 2 * self.top_margin)
+
+    def paintEvent(self, event):
+        """Paint the timeline"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Fill background
+        painter.fillRect(self.rect(), self.colors['background'])
+
+        # Draw time grid
+        self.draw_time_grid(painter)
+
+        # Draw activities
+        self.draw_activities(painter)
+
+    def draw_time_grid(self, painter):
+        """Draw time grid (hours)"""
+        painter.setPen(QPen(self.colors['grid'], 1))
+        font = QFont('Arial', 10)
+        painter.setFont(font)
+
+        width = self.width()
+
+        for hour in range(25):  # 0-24
+            y = self.top_margin + hour * self.hour_height
+
+            # Draw horizontal line
+            painter.drawLine(self.left_margin, y, width - self.right_margin, y)
+
+            # Draw hour label
+            time_str = f"{hour:02d}:00"
+            painter.setPen(QPen(self.colors['text'], 1))
+            painter.drawText(10, y - 5, self.left_margin - 15, 20,
+                           Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                           time_str)
+            painter.setPen(QPen(self.colors['grid'], 1))
+
+    def draw_activities(self, painter):
+        """Draw activity blocks"""
+        if not self.activities:
+            print("Timeline: No activities to draw")
+            return
+
+        width = self.width()
+        timeline_width = width - self.left_margin - self.right_margin
+
+        print(f"Timeline: Drawing {len(self.activities)} activities, widget size: {self.width()}x{self.height()}")
+
+        # Clear previous rects
+        self.activity_rects = []
+
+        for idx, activity in enumerate(self.activities):
+            # Calculate position
+            timestamp = activity['timestamp']
+            duration = activity['duration']
+
+            # Convert to hours from midnight
+            hours_from_midnight = (
+                timestamp.hour +
+                timestamp.minute / 60 +
+                timestamp.second / 3600
+            )
+
+            duration_hours = duration / 3600
+
+            # Calculate rectangle
+            y = self.top_margin + hours_from_midnight * self.hour_height
+            height = duration_hours * self.hour_height
+
+            # Make minimum height visible (at least 3 pixels)
+            if height < 3:
+                height = 3
+
+            rect = QRect(
+                self.left_margin,
+                int(y),
+                timeline_width,
+                int(height)
+            )
+
+            # Choose color based on app (give each app a unique color)
+            app_name = activity['app_name']
+            if app_name not in self.app_colors:
+                # Use hash to get consistent color from palette
+                import hashlib
+                hash_val = int(hashlib.md5(app_name.encode()).hexdigest()[:8], 16)
+                color_idx = hash_val % len(self.color_palette)
+                base_color = self.color_palette[color_idx]
+
+                # If color already used, slightly adjust hue for distinction
+                if base_color in self.app_colors.values():
+                    # Shift hue slightly
+                    h, s, v, a = base_color.getHsv()
+                    h = (h + 20) % 360  # Shift hue by 20 degrees
+                    adjusted_color = QColor.fromHsv(h, s, v, a)
+                    self.app_colors[app_name] = adjusted_color
+                else:
+                    self.app_colors[app_name] = base_color
+
+            is_idle = activity.get('is_idle', False)
+
+            # Check if activity has project assignment
+            if activity.get('project_id'):
+                # Get project color from database
+                projects = self.database.get_projects()
+                project = next((p for p in projects if p['id'] == activity['project_id']), None)
+                if project and project.get('color'):
+                    color = QColor(project['color'])
+                else:
+                    color = self.app_colors[app_name]
+            else:
+                color = self.colors['idle'] if is_idle else self.app_colors[app_name]
+
+            # Draw activity block
+            painter.fillRect(rect, color)
+
+            # Draw border
+            painter.setPen(QPen(QColor(255, 255, 255), 1))
+            painter.drawRect(rect)
+
+            # Store rect for click detection
+            self.activity_rects.append((rect, activity))
+
+            # Debug: print first few
+            if idx < 3:
+                print(f"  Drawing rect at y={y:.1f}, height={height:.1f} for {app_name}")
+
+            # Draw text if block is large enough
+            if height > 15:
+                painter.setPen(QPen(QColor(255, 255, 255), 1))
+                font = QFont('Arial', 8, QFont.Weight.Bold)
+                painter.setFont(font)
+
+                app_name = activity['app_name']
+                window_title = activity['window_title'] or ''
+
+                # Get project name if assigned
+                project_name = ''
+                if activity.get('project_id'):
+                    projects = self.database.get_projects()
+                    project = next((p for p in projects if p['id'] == activity['project_id']), None)
+                    if project:
+                        project_name = project['name']
+
+                # Build text based on available space
+                if height > 40:
+                    # Enough space for multiple lines
+                    text = f"{app_name}"
+                    if project_name:
+                        text += f"\n[{project_name}]"
+                    if window_title and len(window_title) > 0:
+                        text += f"\n{window_title[:40]}"
+                elif height > 25:
+                    # Medium space - show app and project
+                    text = f"{app_name}"
+                    if project_name:
+                        text += f" [{project_name}]"
+                else:
+                    # Minimal space - just app name
+                    text = app_name[:20]
+
+                painter.drawText(
+                    rect.adjusted(5, 2, -5, -2),
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+                    text
+                )
+
+    def wheelEvent(self, event):
+        """Handle mouse wheel for zooming"""
+        # Check if Ctrl is pressed
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            # Zoom with mouse wheel (prevent scrolling)
+            delta = event.angleDelta().y()
+
+            if delta > 0:
+                # Zoom in
+                new_height = min(self.hour_height + 5, 200)
+            else:
+                # Zoom out
+                new_height = max(self.hour_height - 5, 30)
+
+            self.hour_height = new_height
+            self.setMinimumHeight(24 * self.hour_height + 2 * self.top_margin)
+
+            # Update parent slider if exists
+            widget = self.parent()
+            while widget is not None:
+                if hasattr(widget, 'zoom_slider'):
+                    widget.zoom_slider.setValue(new_height)
+                    break
+                widget = widget.parent()
+
+            self.update()
+            event.accept()  # Prevent event propagation
+        else:
+            # Normal scrolling
+            super().wheelEvent(event)
+
+    def mouseMoveEvent(self, event):
+        """Handle mouse movement for tooltips"""
+        # Check if mouse is over an activity
+        for rect, activity in self.activity_rects:
+            if rect.contains(event.pos()):
+                # Show tooltip for this activity
+                tooltip = self._create_tooltip(activity)
+                self.setToolTip(tooltip)
+                return
+
+        # No activity under mouse
+        self.setToolTip("")
+
+    def mousePressEvent(self, event):
+        """Handle mouse clicks"""
+        if event.button() == Qt.MouseButton.RightButton:
+            # Find clicked activity
+            for rect, activity in self.activity_rects:
+                if rect.contains(event.pos()):
+                    self.show_context_menu(event.pos(), activity)
+                    return
+
+    def show_context_menu(self, pos, activity):
+        """Show context menu for activity"""
+        menu = QMenu(self)
+
+        # Get all projects
+        projects = self.database.get_projects()
+
+        if projects:
+            for project in projects:
+                action = QAction(f"→ {project['name']}", self)
+                action.triggered.connect(
+                    lambda checked, aid=activity['id'], pid=project['id']:
+                    self.assign_to_project(aid, pid)
+                )
+                menu.addAction(action)
+
+            menu.addSeparator()
+
+        # Clear project assignment
+        if activity.get('project_id'):
+            clear_action = QAction("Projektzuordnung entfernen", self)
+            clear_action.triggered.connect(
+                lambda: self.assign_to_project(activity['id'], None)
+            )
+            menu.addAction(clear_action)
+
+        menu.exec(self.mapToGlobal(pos))
+
+    def assign_to_project(self, activity_id, project_id):
+        """Assign activity to project"""
+        self.database.assign_activity_to_project(activity_id, project_id)
+        # Find main window and refresh
+        widget = self
+        while widget is not None:
+            if hasattr(widget, 'load_timeline'):
+                widget.load_timeline()
+                break
+            widget = widget.parent()
+
+    def _create_tooltip(self, activity):
+        """Create tooltip text for activity"""
+        from datetime import timedelta
+
+        # Basic info
+        timestamp = activity['timestamp']
+        duration = activity['duration']
+        app_name = activity['app_name']
+        window_title = activity.get('window_title', '')
+
+        # Calculate end time
+        end_time = timestamp + timedelta(seconds=duration)
+
+        # Format duration
+        hours = duration // 3600
+        minutes = (duration % 3600) // 60
+        seconds = duration % 60
+
+        if hours > 0:
+            duration_str = f"{hours}h {minutes}m {seconds}s"
+        elif minutes > 0:
+            duration_str = f"{minutes}m {seconds}s"
+        else:
+            duration_str = f"{seconds}s"
+
+        # Build tooltip
+        tooltip = f"<b>{app_name}</b><br>"
+
+        if window_title:
+            tooltip += f"{window_title}<br>"
+
+        tooltip += f"<br><b>Zeit:</b> {timestamp.strftime('%H:%M:%S')} - {end_time.strftime('%H:%M:%S')}<br>"
+        tooltip += f"<b>Dauer:</b> {duration_str}<br>"
+
+        # Add project if assigned
+        if activity.get('project_id'):
+            projects = self.database.get_projects()
+            project = next((p for p in projects if p['id'] == activity['project_id']), None)
+            if project:
+                tooltip += f"<b>Projekt:</b> {project['name']}<br>"
+
+        # Add idle status
+        if activity.get('is_idle'):
+            tooltip += f"<i>(Idle)</i>"
+
+        return tooltip
