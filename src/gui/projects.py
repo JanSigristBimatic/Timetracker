@@ -1,16 +1,27 @@
-from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
-    QListWidget, QListWidgetItem, QLineEdit, QLabel,
-    QColorDialog, QMessageBox
-)
-from PyQt6.QtGui import QColor, QBrush
+from typing import Optional
+
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QBrush, QColor
+from PyQt6.QtWidgets import (
+    QColorDialog,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+)
+
+from core.database_protocol import DatabaseProtocol
 
 
 class ProjectManagerDialog(QDialog):
     """Dialog for managing projects"""
 
-    def __init__(self, database, parent=None):
+    def __init__(self, database: DatabaseProtocol, parent: Optional[QDialog] = None):
         super().__init__(parent)
         self.database = database
         self.setup_ui()

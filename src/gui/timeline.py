@@ -1,16 +1,19 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QMenu
-from PyQt6.QtCore import Qt, QRect, QPoint
-from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QAction
+import os
 from datetime import datetime, timedelta
+
+from PyQt6.QtCore import QRect, Qt
+from PyQt6.QtGui import QAction, QColor, QFont, QPainter, QPen
+from PyQt6.QtWidgets import QMenu, QWidget
+
+from core.database_protocol import DatabaseProtocol
 from utils.config import should_ignore_activity
 from utils.icon_cache import IconCache
-import os
 
 
 class TimelineWidget(QWidget):
     """Widget to display activity timeline"""
 
-    def __init__(self, database):
+    def __init__(self, database: DatabaseProtocol):
         super().__init__()
         self.database = database
         self.activities = []
@@ -491,6 +494,6 @@ class TimelineWidget(QWidget):
 
         # Add idle status
         if activity.get('is_idle'):
-            tooltip += f"<i>(Idle)</i>"
+            tooltip += "<i>(Idle)</i>"
 
         return tooltip

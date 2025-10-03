@@ -1,15 +1,18 @@
-import sys
+import platform
 import time
 from datetime import datetime
-from threading import Thread, Event
-import platform
+from threading import Event, Thread
+
+from core.database_protocol import DatabaseProtocol
 from utils.config import should_ignore_activity
 
 
 class ActivityTracker:
     """Main activity tracker that works across platforms"""
 
-    def __init__(self, database, poll_interval=2, idle_threshold=300):
+    def __init__(
+        self, database: DatabaseProtocol, poll_interval: int = 2, idle_threshold: int = 300
+    ):
         """
         Initialize activity tracker
 

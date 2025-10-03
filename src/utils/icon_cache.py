@@ -1,15 +1,15 @@
 """Icon extraction and caching for Windows apps"""
 import os
 import sys
-from PyQt6.QtGui import QPixmap, QImage
-from PyQt6.QtCore import QSize
+
+from PyQt6.QtGui import QImage, QPixmap
 
 if sys.platform == 'win32':
+    import io
+
     import win32gui
     import win32ui
-    import win32con
     from PIL import Image
-    import io
 
 
 class IconCache:

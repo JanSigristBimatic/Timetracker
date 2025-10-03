@@ -1,8 +1,9 @@
+import re
+from datetime import datetime
+
+import psutil
 import win32gui
 import win32process
-import psutil
-from datetime import datetime
-import re
 
 
 class WindowsActivityTracker:
@@ -33,7 +34,7 @@ class WindowsActivityTracker:
                 'timestamp': datetime.now(),
                 'process_path': process.exe()
             }
-        except Exception as e:
+        except Exception:
             return None
 
     @staticmethod

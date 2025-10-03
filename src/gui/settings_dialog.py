@@ -1,9 +1,18 @@
-from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QPushButton, QLabel, QSpinBox, QGroupBox, QMessageBox, QTextEdit
-)
-from PyQt6.QtCore import Qt
 import os
+
+from PyQt6.QtWidgets import (
+    QDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QSpinBox,
+    QTextEdit,
+    QVBoxLayout,
+)
+
 from utils.config import DEFAULT_IGNORED_PROCESSES, DEFAULT_IGNORED_WINDOW_TITLES
 
 
@@ -161,7 +170,7 @@ class SettingsDialog(QDialog):
             env_lines = []
 
             if os.path.exists(env_path):
-                with open(env_path, 'r', encoding='utf-8') as f:
+                with open(env_path, encoding='utf-8') as f:
                     env_lines = f.readlines()
 
             # Parse blacklist entries

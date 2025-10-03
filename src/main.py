@@ -1,7 +1,9 @@
 import sys
-from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
-from PyQt6.QtGui import QIcon, QAction
+
 from PyQt6.QtCore import QTimer
+from PyQt6.QtGui import QAction, QIcon
+from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+
 from core.database import Database
 from core.tracker import ActivityTracker
 from gui.main_window import MainWindow

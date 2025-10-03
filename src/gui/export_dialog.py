@@ -1,16 +1,27 @@
-from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
-    QLabel, QDateEdit, QComboBox, QFileDialog, QMessageBox
-)
+from datetime import datetime
+from typing import Optional
+
 from PyQt6.QtCore import QDate
-from datetime import datetime, timedelta
+from PyQt6.QtWidgets import (
+    QComboBox,
+    QDateEdit,
+    QDialog,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+)
+
+from core.database_protocol import DatabaseProtocol
 from utils.export import Exporter
 
 
 class ExportDialog(QDialog):
     """Dialog for exporting data"""
 
-    def __init__(self, database, parent=None):
+    def __init__(self, database: DatabaseProtocol, parent: Optional[QDialog] = None):
         super().__init__(parent)
         self.database = database
         self.exporter = Exporter(database)

@@ -1,7 +1,8 @@
 import sqlite3
 from datetime import datetime
-import os
 from pathlib import Path
+from typing import Any, Optional
+
 
 class Database:
     def __init__(self):
@@ -69,7 +70,15 @@ class Database:
         self.conn.commit()
         cursor.close()
 
-    def save_activity(self, app_name, window_title, start_time, end_time, is_idle=False, process_path=None):
+    def save_activity(
+        self,
+        app_name: str,
+        window_title: str,
+        start_time: datetime,
+        end_time: datetime,
+        is_idle: bool = False,
+        process_path: Optional[str] = None,
+    ) -> int:
         """Save a tracked activity to the database"""
         duration = int((end_time - start_time).total_seconds())
 
@@ -83,9 +92,14 @@ class Database:
         self.conn.commit()
         cursor.close()
 
-        return activity_id
+        return int(activity_id) if activity_id else 0
 
-    def get_activities(self, start_date=None, end_date=None, project_id=None):
+    def get_activities(
+        self,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        project_id: Optional[int] = None,
+    ) -> list[dict[str, Any]]:
         """Retrieve activities with optional filters"""
         cursor = self.conn.cursor()
 
@@ -120,7 +134,7 @@ class Database:
 
         return activities
 
-    def create_project(self, name, color='#3498db'):
+    def create_project(self, name: str, color: str = "#3498db") -> int:
         """Create a new project"""
         cursor = self.conn.cursor()
         cursor.execute('''
@@ -132,9 +146,9 @@ class Database:
         self.conn.commit()
         cursor.close()
 
-        return project_id
+        return int(project_id) if project_id else 0
 
-    def get_projects(self):
+    def get_projects(self) -> list[dict[str, Any]]:
         """Get all projects"""
         cursor = self.conn.cursor()
         cursor.execute('SELECT * FROM projects ORDER BY name')
@@ -143,7 +157,7 @@ class Database:
 
         return projects
 
-    def assign_activity_to_project(self, activity_id, project_id):
+    def assign_activity_to_project(self, activity_id: int, project_id: int) -> None:
         """Assign an activity to a project"""
         cursor = self.conn.cursor()
         cursor.execute('''
@@ -155,7 +169,9 @@ class Database:
         self.conn.commit()
         cursor.close()
 
-    def assign_activities_by_timerange(self, start_time, end_time, app_name, project_id):
+    def assign_activities_by_timerange(
+        self, start_time: datetime, end_time: datetime, app_name: str, project_id: int
+    ) -> int:
         """Assign all activities in a time range for a specific app to a project"""
         cursor = self.conn.cursor()
         cursor.execute('''
@@ -172,7 +188,7 @@ class Database:
 
         return rows_affected
 
-    def get_setting(self, key, default=None):
+    def get_setting(self, key: str, default: Optional[str] = None) -> Optional[str]:
         """Get a setting value"""
         cursor = self.conn.cursor()
         cursor.execute('SELECT value FROM settings WHERE key = ?', (key,))
@@ -181,7 +197,7 @@ class Database:
 
         return result[0] if result else default
 
-    def set_setting(self, key, value):
+    def set_setting(self, key: str, value: str) -> None:
         """Set a setting value"""
         cursor = self.conn.cursor()
         cursor.execute('''
@@ -192,7 +208,7 @@ class Database:
         self.conn.commit()
         cursor.close()
 
-    def close(self):
+    def close(self) -> None:
         """Close database connection"""
         if self.conn:
             self.conn.close()

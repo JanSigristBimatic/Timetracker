@@ -1,30 +1,35 @@
+from datetime import datetime
+
+from PyQt6.QtCore import QDate, QEvent, Qt, QTimer
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
-    QMainWindow,
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QPushButton,
-    QLabel,
+    QComboBox,
     QDateEdit,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QPushButton,
     QScrollArea,
     QSlider,
-    QComboBox,
-    QFrame,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import Qt, QDate, QTimer, QEvent
-from PyQt6.QtGui import QFont
-from datetime import datetime, timedelta
-from .timeline import TimelineWidget
-from .projects import ProjectManagerDialog
-from .export_dialog import ExportDialog
-from .settings_dialog import SettingsDialog
+
+from core.database_protocol import DatabaseProtocol
+from core.tracker import ActivityTracker
 from utils.icon_cache import IconCache
+
+from .export_dialog import ExportDialog
+from .projects import ProjectManagerDialog
+from .settings_dialog import SettingsDialog
+from .timeline import TimelineWidget
 
 
 class MainWindow(QMainWindow):
     """Main application window"""
 
-    def __init__(self, database, tracker):
+    def __init__(self, database: DatabaseProtocol, tracker: ActivityTracker):
         super().__init__()
         self.database = database
         self.tracker = tracker

@@ -1,14 +1,16 @@
 """Export functionality for time tracking data"""
 import csv
 from datetime import datetime, timedelta
-from pathlib import Path
+
 import pandas as pd
+
+from core.database_protocol import DatabaseProtocol
 
 
 class Exporter:
     """Handle data exports"""
 
-    def __init__(self, database):
+    def __init__(self, database: DatabaseProtocol):
         self.database = database
 
     def export_csv(self, start_date, end_date, filepath):
