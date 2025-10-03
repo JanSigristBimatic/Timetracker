@@ -126,7 +126,8 @@ class ActivityTracker:
                 window_title=self.current_activity['window_title'],
                 start_time=self.start_time,
                 end_time=end_time,
-                is_idle=is_idle
+                is_idle=is_idle,
+                process_path=self.current_activity.get('process_path')
             )
 
     def get_current_activity(self):

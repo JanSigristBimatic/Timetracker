@@ -2,6 +2,7 @@ import win32gui
 import win32process
 import psutil
 from datetime import datetime
+import re
 
 
 class WindowsActivityTracker:
@@ -19,15 +20,42 @@ class WindowsActivityTracker:
             process = psutil.Process(pid)
 
             window_title = win32gui.GetWindowText(hwnd)
+            app_name = process.name()
+
+            # Enhanced browser tracking
+            browser_info = WindowsActivityTracker._get_browser_info(app_name, window_title)
+            if browser_info:
+                window_title = browser_info
 
             return {
-                'app_name': process.name(),
+                'app_name': app_name,
                 'window_title': window_title,
                 'timestamp': datetime.now(),
                 'process_path': process.exe()
             }
         except Exception as e:
             return None
+
+    @staticmethod
+    def _get_browser_info(app_name, window_title):
+        """Extract browser tab information from window title"""
+        app_lower = app_name.lower()
+
+        # Chrome, Edge, Brave
+        if any(browser in app_lower for browser in ['chrome.exe', 'msedge.exe', 'brave.exe']):
+            # Window title format: "Page Title - Google Chrome"
+            match = re.match(r'^(.+?) - (?:Google Chrome|Microsoft Edge|Brave)$', window_title)
+            if match:
+                return match.group(1)
+
+        # Firefox
+        elif 'firefox.exe' in app_lower:
+            # Window title format: "Page Title - Mozilla Firefox"
+            match = re.match(r'^(.+?) - Mozilla Firefox(?: Private Browsing)?$', window_title)
+            if match:
+                return match.group(1)
+
+        return None
 
     @staticmethod
     def get_idle_time():

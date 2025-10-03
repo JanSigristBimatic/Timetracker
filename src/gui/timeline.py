@@ -3,6 +3,8 @@ from PyQt6.QtCore import Qt, QRect, QPoint
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QAction
 from datetime import datetime, timedelta
 from utils.config import should_ignore_activity
+from utils.icon_cache import IconCache
+import os
 
 
 class TimelineWidget(QWidget):
@@ -13,6 +15,14 @@ class TimelineWidget(QWidget):
         self.database = database
         self.activities = []
         self.current_date = datetime.now().date()
+
+        # Icon cache
+        self.icon_cache = IconCache()
+
+        # Merge settings from environment
+        self.merge_gap = int(os.getenv('MERGE_GAP', 60))
+        self.min_activity_duration = int(os.getenv('MIN_ACTIVITY_DURATION', 10))
+        self.project_merge_gap = int(os.getenv('PROJECT_MERGE_GAP', 180))
 
         # Visual settings
         self.hour_height = 60  # pixels per hour (adjustable via zoom)
@@ -84,20 +94,29 @@ class TimelineWidget(QWidget):
         # Merge consecutive activities from the same app
         self.activities = self._merge_activities(filtered)
         self.current_date = date
-        print(f"Timeline: Loading {len(activities)} activities for {date}")
-        print(f"Timeline: After filtering: {len(filtered)} activities")
-        print(f"Timeline: After merging: {len(self.activities)} activities")
-        if self.activities:
-            print(f"  First activity: {self.activities[0]['timestamp']} - {self.activities[0]['app_name']}")
         self.update()
 
     def _merge_activities(self, activities):
-        """Merge consecutive activities from the same app"""
+        """
+        Merge consecutive activities with intelligent filtering:
+        1. Filter out activities shorter than MIN_ACTIVITY_DURATION
+        2. Merge same app activities within MERGE_GAP
+        3. Merge same project activities within PROJECT_MERGE_GAP (more aggressive)
+        """
         if not activities:
             return []
 
+        # Step 1: Filter out too-short activities (noise reduction)
+        filtered = [
+            act for act in activities
+            if act['duration'] >= self.min_activity_duration
+        ]
+
+        if not filtered:
+            return []
+
         # Sort by timestamp (oldest first for merging)
-        sorted_activities = sorted(activities, key=lambda x: x['timestamp'])
+        sorted_activities = sorted(filtered, key=lambda x: x['timestamp'])
 
         merged = []
         current = None
@@ -107,15 +126,27 @@ class TimelineWidget(QWidget):
                 # First activity
                 current = activity.copy()
                 current['end_time'] = current['timestamp'] + timedelta(seconds=current['duration'])
-            elif (current['app_name'] == activity['app_name'] and
-                  not current.get('is_idle', False) and
-                  not activity.get('is_idle', False)):
-                # Same app, merge them
+            else:
                 activity_end = activity['timestamp'] + timedelta(seconds=activity['duration'])
-
-                # Check if activities are close enough (within 5 seconds gap)
                 gap = (activity['timestamp'] - current['end_time']).total_seconds()
-                if gap <= 5:
+
+                # Determine if we should merge
+                should_merge = False
+
+                # Skip merging for idle activities
+                if current.get('is_idle', False) or activity.get('is_idle', False):
+                    should_merge = False
+                # Smart merge: Same project with larger gap allowance
+                elif (current.get('project_id') and
+                      activity.get('project_id') and
+                      current['project_id'] == activity['project_id'] and
+                      current['app_name'] == activity['app_name']):
+                    should_merge = gap <= self.project_merge_gap
+                # Normal merge: Same app within standard gap
+                elif current['app_name'] == activity['app_name']:
+                    should_merge = gap <= self.merge_gap
+
+                if should_merge:
                     # Extend current activity
                     current['end_time'] = activity_end
                     current['duration'] = int((current['end_time'] - current['timestamp']).total_seconds())
@@ -123,15 +154,10 @@ class TimelineWidget(QWidget):
                     if activity['window_title']:
                         current['window_title'] = activity['window_title']
                 else:
-                    # Gap too large, save current and start new
+                    # Save current and start new
                     merged.append(current)
                     current = activity.copy()
-                    current['end_time'] = current['timestamp'] + timedelta(seconds=current['duration'])
-            else:
-                # Different app or idle, save current and start new
-                merged.append(current)
-                current = activity.copy()
-                current['end_time'] = current['timestamp'] + timedelta(seconds=current['duration'])
+                    current['end_time'] = activity_end
 
         # Don't forget the last one
         if current:
@@ -183,13 +209,10 @@ class TimelineWidget(QWidget):
     def draw_activities(self, painter):
         """Draw activity blocks"""
         if not self.activities:
-            print("Timeline: No activities to draw")
             return
 
         width = self.width()
         timeline_width = width - self.left_margin - self.right_margin
-
-        print(f"Timeline: Drawing {len(self.activities)} activities, widget size: {self.width()}x{self.height()}")
 
         # Clear previous rects
         self.activity_rects = []
@@ -266,12 +289,23 @@ class TimelineWidget(QWidget):
             # Store rect for click detection
             self.activity_rects.append((rect, activity))
 
-            # Debug: print first few
-            if idx < 3:
-                print(f"  Drawing rect at y={y:.1f}, height={height:.1f} for {app_name}")
-
-            # Draw text if block is large enough
+            # Draw icon and text if block is large enough
             if height > 15:
+                # Try to get icon
+                icon_pixmap = None
+                text_offset = 5
+
+                if activity.get('process_path'):
+                    icon_pixmap = self.icon_cache.get_icon_pixmap(activity['process_path'], size=16)
+
+                if icon_pixmap and not icon_pixmap.isNull():
+                    # Scale icon to fit properly
+                    scaled_icon = icon_pixmap.scaled(14, 14, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                    # Draw icon
+                    icon_y = rect.y() + 2
+                    painter.drawPixmap(rect.x() + 3, icon_y, scaled_icon)
+                    text_offset = 20  # Make room for icon
+
                 painter.setPen(QPen(QColor(255, 255, 255), 1))
                 font = QFont('Arial', 8, QFont.Weight.Bold)
                 painter.setFont(font)
@@ -305,7 +339,7 @@ class TimelineWidget(QWidget):
                     text = app_name[:20]
 
                 painter.drawText(
-                    rect.adjusted(5, 2, -5, -2),
+                    rect.adjusted(text_offset, 2, -5, -2),
                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
                     text
                 )
@@ -336,7 +370,8 @@ class TimelineWidget(QWidget):
                 widget = widget.parent()
 
             self.update()
-            event.accept()  # Prevent event propagation
+            event.accept()  # Accept the event to prevent scrolling
+            return  # Don't propagate to parent
         else:
             # Normal scrolling
             super().wheelEvent(event)
@@ -374,8 +409,8 @@ class TimelineWidget(QWidget):
             for project in projects:
                 action = QAction(f"→ {project['name']}", self)
                 action.triggered.connect(
-                    lambda checked, aid=activity['id'], pid=project['id']:
-                    self.assign_to_project(aid, pid)
+                    lambda checked, act=activity, pid=project['id']:
+                    self.assign_to_project(act, pid)
                 )
                 menu.addAction(action)
 
@@ -385,15 +420,26 @@ class TimelineWidget(QWidget):
         if activity.get('project_id'):
             clear_action = QAction("Projektzuordnung entfernen", self)
             clear_action.triggered.connect(
-                lambda: self.assign_to_project(activity['id'], None)
+                lambda: self.assign_to_project(activity, None)
             )
             menu.addAction(clear_action)
 
         menu.exec(self.mapToGlobal(pos))
 
-    def assign_to_project(self, activity_id, project_id):
-        """Assign activity to project"""
-        self.database.assign_activity_to_project(activity_id, project_id)
+    def assign_to_project(self, activity, project_id):
+        """Assign activity to project (including all merged activities in the timerange)"""
+        # Use the merged activity's time range to assign ALL activities in that range
+        start_time = activity['timestamp']
+        end_time = activity.get('end_time', start_time + timedelta(seconds=activity['duration']))
+        app_name = activity['app_name']
+
+        # Assign all activities in this time range for this app
+        count = self.database.assign_activities_by_timerange(
+            start_time, end_time, app_name, project_id
+        )
+
+        print(f"Assigned {count} activities to project")
+
         # Find main window and refresh
         widget = self
         while widget is not None:
