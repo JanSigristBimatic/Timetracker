@@ -18,6 +18,9 @@ class Database:
         self.conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row  # Return rows as dictionaries
 
+        # Enable foreign key constraints (must be done for each connection)
+        self.conn.execute("PRAGMA foreign_keys = ON")
+
         # Thread safety lock for write operations
         self._write_lock = Lock()
 
@@ -33,7 +36,8 @@ class Database:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT UNIQUE NOT NULL,
                 color TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_used TIMESTAMP
             )
         ''')
 
@@ -81,8 +85,28 @@ class Database:
         self.conn.commit()
         cursor.close()
 
+        # Run migrations
+        self._run_migrations()
+
         # Initialize Social Media project if it doesn't exist
         self._initialize_social_media_project()
+
+    def _run_migrations(self):
+        """Run database migrations"""
+        cursor = self.conn.cursor()
+
+        # Migration: Add last_used column to projects table if it doesn't exist
+        cursor.execute("PRAGMA table_info(projects)")
+        columns = [column[1] for column in cursor.fetchall()]
+
+        if 'last_used' not in columns:
+            with self._write_lock:
+                cursor.execute('''
+                    ALTER TABLE projects ADD COLUMN last_used TIMESTAMP
+                ''')
+                self.conn.commit()
+
+        cursor.close()
 
     def save_activity(
         self,
@@ -255,10 +279,35 @@ class Database:
             ''', (project_id, start_time, end_time, app_name))
 
             rows_affected = cursor.rowcount
+
+            # Update last_used timestamp for the project if it's not None
+            if project_id is not None:
+                cursor.execute('''
+                    UPDATE projects
+                    SET last_used = ?
+                    WHERE id = ?
+                ''', (datetime.now(), project_id))
+
             self.conn.commit()
             cursor.close()
 
         return rows_affected
+
+    def get_recently_used_projects(self, limit: int = 10) -> list[dict[str, Any]]:
+        """Get recently used projects"""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT id, name, color, last_used
+            FROM projects
+            WHERE last_used IS NOT NULL
+            ORDER BY last_used DESC
+            LIMIT ?
+        ''', (limit,))
+
+        projects = [dict(row) for row in cursor.fetchall()]
+        cursor.close()
+
+        return projects
 
     def get_setting(self, key: str, default: Optional[str] = None) -> Optional[str]:
         """Get a setting value"""

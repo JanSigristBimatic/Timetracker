@@ -172,3 +172,9 @@ def sample_projects(mock_db):
     mock_db.create_project("Testing", "#e74c3c")
 
     return mock_db
+
+
+@pytest.fixture
+def temp_db_path(tmp_path):
+    """Fixture providing a temporary database path"""
+    return tmp_path

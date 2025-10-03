@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 
 from PyQt6.QtCore import QDate, QEvent, Qt, QTimer
 from PyQt6.QtGui import QFont
@@ -24,6 +25,58 @@ from .export_dialog import ExportDialog
 from .projects import ProjectManagerDialog
 from .settings_dialog import SettingsDialog
 from .timeline import TimelineWidget
+
+
+class ProjectDropWidget(QWidget):
+    """Widget that accepts drops for project assignment"""
+
+    def __init__(self, project_id, project_name, main_window):
+        super().__init__()
+        self.project_id = project_id
+        self.project_name = project_name
+        self.main_window = main_window
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        """Accept drag events with activity data"""
+        if event.mimeData().hasText():
+            event.acceptProposedAction()
+            self.setStyleSheet("background-color: #e8f4f8; border-radius: 3px;")
+
+    def dragLeaveEvent(self, event):
+        """Reset style when drag leaves"""
+        self.setStyleSheet("")
+
+    def dropEvent(self, event):
+        """Handle drop of activities"""
+        self.setStyleSheet("")
+        if event.mimeData().hasText():
+            try:
+                activity_data = json.loads(event.mimeData().text())
+                # Assign all activities to this project
+                total_count = 0
+                for act_data in activity_data:
+                    timestamp = datetime.fromisoformat(act_data['timestamp'])
+                    duration = act_data['duration']
+                    app_name = act_data['app_name']
+
+                    # Use timerange assignment for merged activities
+                    end_time = timestamp + datetime.timedelta(seconds=duration)
+                    count = self.main_window.database.assign_activities_by_timerange(
+                        timestamp, end_time, app_name, self.project_id
+                    )
+                    total_count += count
+
+                print(f"Assigned {total_count} activities to project '{self.project_name}'")
+
+                # Refresh timeline
+                self.main_window.load_timeline()
+
+                event.acceptProposedAction()
+            except Exception as e:
+                print(f"Error dropping activities: {e}")
+                import traceback
+                traceback.print_exc()
 
 
 class MainWindow(QMainWindow):
@@ -91,6 +144,10 @@ class MainWindow(QMainWindow):
         # Filter bar
         filter_bar = self.create_filter_bar()
         layout.addLayout(filter_bar)
+
+        # Recent projects bar (between filters and stats)
+        self.recent_projects_bar = self.create_recent_projects_bar()
+        layout.addWidget(self.recent_projects_bar)
 
         # Bottom stats bar
         self.stats_label = QLabel()
@@ -167,6 +224,68 @@ class MainWindow(QMainWindow):
         layout.addWidget(refresh_btn)
 
         return layout
+
+    def create_recent_projects_bar(self):
+        """Create bar with recently used projects for quick assignment"""
+        frame = QFrame()
+        frame.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
+        frame.setStyleSheet("background-color: #f8f9fa; padding: 5px;")
+
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(10, 5, 10, 5)
+
+        # Title
+        title_label = QLabel("Zuletzt verwendet:")
+        title_font = QFont()
+        title_font.setPointSize(10)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        layout.addWidget(title_label)
+
+        # Container for project widgets
+        self.recent_projects_container = QWidget()
+        self.recent_projects_layout = QHBoxLayout(self.recent_projects_container)
+        self.recent_projects_layout.setContentsMargins(0, 0, 0, 0)
+        self.recent_projects_layout.setSpacing(5)
+
+        layout.addWidget(self.recent_projects_container)
+        layout.addStretch()
+
+        return frame
+
+    def update_recent_projects_bar(self):
+        """Update the recently used projects bar"""
+        # Clear existing widgets
+        while self.recent_projects_layout.count():
+            child = self.recent_projects_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        # Get recently used projects
+        recent_projects = self.database.get_recently_used_projects(limit=10)
+
+        for project in recent_projects:
+            # Create drop widget for each project
+            project_widget = ProjectDropWidget(project['id'], project['name'], self)
+            project_widget.setFixedHeight(30)
+            project_widget.setStyleSheet(
+                f"background-color: {project['color']}; "
+                "border-radius: 5px; padding: 5px 10px; color: white; font-weight: bold;"
+            )
+
+            project_label = QLabel(project['name'])
+            project_label.setStyleSheet("color: white; font-weight: bold;")
+            project_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            project_layout = QHBoxLayout(project_widget)
+            project_layout.setContentsMargins(5, 0, 5, 0)
+            project_layout.addWidget(project_label)
+
+            self.recent_projects_layout.addWidget(project_widget)
+
+        # Add spacer if there are projects
+        if recent_projects:
+            self.recent_projects_layout.addStretch()
 
     def create_filter_bar(self):
         """Create filter bar"""
@@ -307,8 +426,8 @@ class MainWindow(QMainWindow):
             hours = seconds / 3600
             percentage = (seconds / total_seconds * 100) if total_seconds > 0 else 0
 
-            # Project item
-            project_widget = QWidget()
+            # Project item (with drop support)
+            project_widget = ProjectDropWidget(project_id, project["name"], self)
             project_layout = QHBoxLayout(project_widget)
             project_layout.setContentsMargins(5, 5, 5, 5)
 
@@ -429,11 +548,13 @@ class MainWindow(QMainWindow):
                     icon_label.setFixedSize(24, 24)
                     app_layout.addWidget(icon_label)
 
-            # App name
+            # App name (clickable)
             name_label = QLabel(app_name)
             name_font = QFont()
             name_font.setPointSize(11)
             name_label.setFont(name_font)
+            name_label.setCursor(Qt.CursorShape.PointingHandCursor)
+            name_label.mousePressEvent = lambda event, app=app_name: self.select_app_activities(app)
             app_layout.addWidget(name_label, stretch=1)
 
             # Time
@@ -524,11 +645,13 @@ class MainWindow(QMainWindow):
                     icon_label.setFixedSize(24, 24)
                     file_layout.addWidget(icon_label)
 
-            # File name
+            # File name (clickable)
             name_label = QLabel(filename)
             name_font = QFont()
             name_font.setPointSize(11)
             name_label.setFont(name_font)
+            name_label.setCursor(Qt.CursorShape.PointingHandCursor)
+            name_label.mousePressEvent = lambda event, file=filename: self.select_file_activities(file)
             file_layout.addWidget(name_label, stretch=1)
 
             # Time
@@ -754,6 +877,7 @@ class MainWindow(QMainWindow):
         self.update_stats(activities)
         self.update_stats_sidebar(activities)
         self.update_filter_options()
+        self.update_recent_projects_bar()
 
     def refresh_timeline(self):
         """Refresh the timeline"""
@@ -896,3 +1020,73 @@ class MainWindow(QMainWindow):
         """Clear all filters"""
         self.app_filter.setCurrentIndex(0)
         self.project_filter.setCurrentIndex(0)
+
+    def select_app_activities(self, app_name):
+        """Select all activities for a specific app"""
+        # Filter by app if not already filtered
+        app_index = self.app_filter.findData(app_name)
+        if app_index >= 0:
+            self.app_filter.setCurrentIndex(app_index)
+
+        # Get all activities matching the current filter (which now includes the app)
+        start_datetime = datetime.combine(self.current_date, datetime.min.time())
+        end_datetime = datetime.combine(self.current_date, datetime.max.time())
+
+        selected_project = self.project_filter.currentData()
+
+        # Handle "Ohne Projekt" filter
+        if selected_project == "NO_PROJECT":
+            activities = self.database.get_activities(
+                start_date=start_datetime,
+                end_date=end_datetime,
+            )
+            activities = [a for a in activities if a.get("project_id") is None and a["app_name"] == app_name]
+        else:
+            activities = self.database.get_activities(
+                start_date=start_datetime,
+                end_date=end_datetime,
+                project_id=selected_project,
+            )
+            activities = [a for a in activities if a["app_name"] == app_name]
+
+        # Select all activities in timeline
+        self.timeline.select_all_activities(activities)
+
+    def select_file_activities(self, filename):
+        """Select all activities for a specific file"""
+        # Get all activities for the day
+        start_datetime = datetime.combine(self.current_date, datetime.min.time())
+        end_datetime = datetime.combine(self.current_date, datetime.max.time())
+
+        selected_project = self.project_filter.currentData()
+
+        # Handle "Ohne Projekt" filter
+        if selected_project == "NO_PROJECT":
+            activities = self.database.get_activities(
+                start_date=start_datetime,
+                end_date=end_datetime,
+            )
+            activities = [a for a in activities if a.get("project_id") is None]
+        else:
+            activities = self.database.get_activities(
+                start_date=start_datetime,
+                end_date=end_datetime,
+                project_id=selected_project,
+            )
+
+        # Apply app filter if active
+        selected_app = self.app_filter.currentData()
+        if selected_app:
+            activities = [a for a in activities if a["app_name"] == selected_app]
+
+        # Filter by filename extracted from window title
+        matching_activities = []
+        for activity in activities:
+            window_title = activity.get("window_title", "")
+            if window_title:
+                extracted_filename = self.extract_filename_from_title(window_title)
+                if extracted_filename == filename:
+                    matching_activities.append(activity)
+
+        # Select all matching activities in timeline
+        self.timeline.select_all_activities(matching_activities)

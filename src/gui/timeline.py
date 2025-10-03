@@ -1,8 +1,8 @@
 import os
 from datetime import datetime, timedelta
 
-from PyQt6.QtCore import QRect, Qt
-from PyQt6.QtGui import QAction, QColor, QFont, QPainter, QPen
+from PyQt6.QtCore import QRect, Qt, QMimeData
+from PyQt6.QtGui import QAction, QColor, QFont, QPainter, QPen, QDrag
 from PyQt6.QtWidgets import QMenu, QWidget
 
 from core.database_protocol import DatabaseProtocol
@@ -89,6 +89,9 @@ class TimelineWidget(QWidget):
         self.setMinimumHeight(24 * self.hour_height + 2 * self.top_margin)
         self.setMouseTracking(True)
         self.setToolTip("")  # Enable tooltips
+
+        # Drag and drop support
+        self.drag_start_position = None
 
     def set_activities(self, activities, date):
         """Set activities to display"""
@@ -387,7 +390,17 @@ class TimelineWidget(QWidget):
             super().wheelEvent(event)
 
     def mouseMoveEvent(self, event):
-        """Handle mouse movement for tooltips"""
+        """Handle mouse movement for tooltips and drag"""
+        # Check for drag initiation
+        if (event.buttons() & Qt.MouseButton.LeftButton and
+            self.drag_start_position is not None and
+            self.selected_activities):
+            # Calculate distance moved
+            distance = (event.pos() - self.drag_start_position).manhattanLength()
+            if distance >= 10:  # Minimum drag distance
+                self.start_drag()
+                return
+
         # Check if mouse is over an activity
         for rect, activity in self.activity_rects:
             if rect.contains(event.pos()):
@@ -399,9 +412,36 @@ class TimelineWidget(QWidget):
         # No activity under mouse
         self.setToolTip("")
 
+    def start_drag(self):
+        """Start drag operation with selected activities"""
+        if not self.selected_activities:
+            return
+
+        drag = QDrag(self)
+        mime_data = QMimeData()
+
+        # Store activity IDs in mime data (we'll use the timestamp as identifier)
+        activity_data = []
+        for activity in self.selected_activities:
+            activity_data.append({
+                'timestamp': activity['timestamp'].isoformat(),
+                'app_name': activity['app_name'],
+                'duration': activity['duration']
+            })
+
+        import json
+        mime_data.setText(json.dumps(activity_data))
+        drag.setMimeData(mime_data)
+
+        # Execute drag
+        drag.exec(Qt.DropAction.CopyAction)
+
     def mousePressEvent(self, event):
         """Handle mouse clicks"""
         if event.button() == Qt.MouseButton.LeftButton:
+            # Store drag start position
+            self.drag_start_position = event.pos()
+
             # Find clicked activity
             for rect, activity in self.activity_rects:
                 if rect.contains(event.pos()):
@@ -551,6 +591,29 @@ class TimelineWidget(QWidget):
                 widget.load_timeline()
                 break
             widget = widget.parent()
+
+    def select_all_activities(self, activities):
+        """Select all given activities in the timeline"""
+        # Find matching activities from the merged activities
+        self.selected_activities = []
+
+        for target_activity in activities:
+            # Find the merged activity that contains this activity
+            for merged_activity in self.activities:
+                # Check if this merged activity overlaps with the target activity
+                target_start = target_activity['timestamp']
+                target_end = target_activity['timestamp'] + timedelta(seconds=target_activity['duration'])
+                merged_start = merged_activity['timestamp']
+                merged_end = merged_activity.get('end_time', merged_start + timedelta(seconds=merged_activity['duration']))
+
+                # Check for overlap and same app
+                if (merged_activity['app_name'] == target_activity['app_name'] and
+                    merged_start <= target_end and merged_end >= target_start):
+                    if merged_activity not in self.selected_activities:
+                        self.selected_activities.append(merged_activity)
+                    break
+
+        self.update()
 
     def _create_tooltip(self, activity):
         """Create tooltip text for activity"""

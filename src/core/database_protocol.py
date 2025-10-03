@@ -142,6 +142,18 @@ class DatabaseProtocol(Protocol):
         """
         ...
 
+    def get_recently_used_projects(self, limit: int = 10) -> list[dict[str, Any]]:
+        """
+        Get recently used projects
+
+        Args:
+            limit: Maximum number of projects to return (default: 10)
+
+        Returns:
+            List of recently used project dictionaries
+        """
+        ...
+
     def close(self) -> None:
         """Close database connection"""
         ...

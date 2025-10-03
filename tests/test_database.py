@@ -95,9 +95,12 @@ class TestDatabase:
         assert project_id > 0
 
         projects = temp_db.get_projects()
-        assert len(projects) == 1
-        assert projects[0]["name"] == "Test Project"
-        assert projects[0]["color"] == "#FF5733"
+        # Should have 2 projects: "Social Media" (auto-created) and "Test Project"
+        assert len(projects) == 2
+        # Find the test project
+        test_project = next(p for p in projects if p["name"] == "Test Project")
+        assert test_project["name"] == "Test Project"
+        assert test_project["color"] == "#FF5733"
 
     def test_project_unique_name(self, temp_db):
         """Test that project names must be unique"""
@@ -229,12 +232,16 @@ class TestDatabase:
         )
         temp_db.assign_activity_to_project(activity_id, project_id)
 
+        # Verify assignment worked
+        activities_before = temp_db.get_activities()
+        assert activities_before[0]["project_id"] == project_id
+
         # Delete project
         cursor = temp_db.conn.cursor()
         cursor.execute("DELETE FROM projects WHERE id = ?", (project_id,))
         temp_db.conn.commit()
+        cursor.close()
 
         # Check that activity's project_id is now NULL
         activities = temp_db.get_activities()
-        # SQLite may return NULL as None or 1 (depending on row_factory)
-        assert activities[0]["project_id"] in (None, 1)
+        assert activities[0]["project_id"] is None
