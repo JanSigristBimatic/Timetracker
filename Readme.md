@@ -4,7 +4,7 @@ Eine plattformübergreifende Desktop-Anwendung zur automatischen Zeiterfassung I
 
 ## Überblick
 
-TimeTracker ist eine intelligente Zeiterfassungsanwendung, die automatisch verfolgt, welche Anwendungen und Fenster Sie nutzen. Die Anwendung läuft im Hintergrund und bietet detaillierte Einblicke in Ihre Produktivität durch eine intuitive grafische Benutzeroberfläche.
+TimeTracker ist eine intelligente Zeiterfassungsanwendung, die automatisch verfolgt, welche Anwendungen und Fenster Sie nutzen. Die Anwendung läuft im Hintergrund und bietet detaillierte Einblicke in Ihre Produktivität durch eine intuitive grafische Benutzeroberfläche. Die Erfassten Zeiten können dann Projekten zugewiesen werden.
 
 ### Hauptfunktionen
 
@@ -19,11 +19,11 @@ TimeTracker ist eine intelligente Zeiterfassungsanwendung, die automatisch verfo
 
 ## Screenshots
 
-[Platzhalter für Screenshots der Hauptoberfläche]
+![alt text](Printscreen.png)
 
 ## Systemanforderungen
 
-- **Betriebssystem**: Windows (macOS und Linux in Entwicklung)
+- **Betriebssystem**: Windows
 - **Python**: 3.9 oder höher
 - **Festplattenspeicher**: ~50 MB
 
@@ -78,11 +78,6 @@ python src/main.py
 4. **Aktivitäten zuordnen** - Ordnen Sie vergangene oder aktuelle Aktivitäten Projekten zu
 5. **Daten exportieren** - Exportieren Sie Berichte über das Menü "Datei" → "Exportieren"
 
-### Tastenkombinationen
-
-- `Strg+Q` - Anwendung beenden
-- `Strg+E` - Export-Dialog öffnen
-
 ## Projektstruktur
 
 ```
@@ -115,7 +110,6 @@ Timetracker/
 
 Die Konfigurationsdatei wird automatisch erstellt unter:
 - **Windows**: `%USERPROFILE%\.timetracker\config.json`
-- **macOS/Linux**: `~/.timetracker/config.json`
 
 ### Beispielkonfiguration
 
@@ -132,7 +126,6 @@ Die Konfigurationsdatei wird automatisch erstellt unter:
 
 Die SQLite-Datenbank wird automatisch erstellt unter:
 - **Windows**: `%USERPROFILE%\.timetracker\timetracker.db`
-- **macOS/Linux**: `~/.timetracker/timetracker.db`
 
 Die Datenbank enthält folgende Tabellen:
 - `activities` - Einzelne Aktivitätseinträge
@@ -187,7 +180,7 @@ Beiträge sind willkommen! Bitte folgen Sie diesen Schritten:
 
 ## Lizenz
 
-[Lizenzinformation hier einfügen - z.B. MIT, GPL, etc.]
+MIT
 
 ## Autor
 
@@ -217,10 +210,6 @@ Bei Fragen oder Problemen erstellen Sie bitte ein [Issue](https://github.com/[us
 
 ## Roadmap
 
-- [ ] macOS-Unterstützung
-- [ ] Linux-Unterstützung
 - [ ] Cloud-Synchronisation
-- [ ] Mobile Apps für Berichtseinsicht
 - [ ] Erweiterte Statistiken und Analysen
-- [ ] Team-Funktionen
 - [ ] API für Drittanbieter-Integrationen
