@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 
 from PyQt6.QtCore import QDate, QEvent, Qt, QTimer
@@ -36,20 +36,27 @@ class ProjectDropWidget(QWidget):
         self.project_name = project_name
         self.main_window = main_window
         self.setAcceptDrops(True)
+        self.original_stylesheet = ""
 
     def dragEnterEvent(self, event):
         """Accept drag events with activity data"""
         if event.mimeData().hasText():
             event.acceptProposedAction()
-            self.setStyleSheet("background-color: #e8f4f8; border-radius: 3px;")
+            # Save original stylesheet
+            self.original_stylesheet = self.styleSheet()
+            # Add visual feedback with border and lighter background
+            self.setStyleSheet(
+                self.original_stylesheet +
+                "border: 2px dashed #3498db; background-color: rgba(52, 152, 219, 0.1);"
+            )
 
     def dragLeaveEvent(self, event):
         """Reset style when drag leaves"""
-        self.setStyleSheet("")
+        self.setStyleSheet(self.original_stylesheet)
 
     def dropEvent(self, event):
         """Handle drop of activities"""
-        self.setStyleSheet("")
+        self.setStyleSheet(self.original_stylesheet)
         if event.mimeData().hasText():
             try:
                 activity_data = json.loads(event.mimeData().text())
@@ -61,7 +68,7 @@ class ProjectDropWidget(QWidget):
                     app_name = act_data['app_name']
 
                     # Use timerange assignment for merged activities
-                    end_time = timestamp + datetime.timedelta(seconds=duration)
+                    end_time = timestamp + timedelta(seconds=duration)
                     count = self.main_window.database.assign_activities_by_timerange(
                         timestamp, end_time, app_name, self.project_id
                     )
@@ -276,6 +283,7 @@ class MainWindow(QMainWindow):
             project_label = QLabel(project['name'])
             project_label.setStyleSheet("color: white; font-weight: bold;")
             project_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            project_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
             project_layout = QHBoxLayout(project_widget)
             project_layout.setContentsMargins(5, 0, 5, 0)
@@ -437,6 +445,7 @@ class MainWindow(QMainWindow):
             color_label.setStyleSheet(
                 f"background-color: {project['color']}; border-radius: 2px;"
             )
+            color_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             project_layout.addWidget(color_label)
 
             # Project name
@@ -445,6 +454,7 @@ class MainWindow(QMainWindow):
             name_font.setPointSize(11)
             name_font.setBold(True)
             name_label.setFont(name_font)
+            name_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             project_layout.addWidget(name_label, stretch=1)
 
             # Time
@@ -453,6 +463,7 @@ class MainWindow(QMainWindow):
             time_font.setPointSize(11)
             time_label.setFont(time_font)
             time_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+            time_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             project_layout.addWidget(time_label)
 
             self.stats_layout.addWidget(project_widget)
