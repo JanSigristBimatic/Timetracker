@@ -241,13 +241,22 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout(frame)
         layout.setContentsMargins(10, 5, 10, 5)
 
-        # Title
+        # Title with description
         title_label = QLabel("Zuletzt verwendet:")
         title_font = QFont()
         title_font.setPointSize(10)
         title_font.setBold(True)
         title_label.setFont(title_font)
         layout.addWidget(title_label)
+
+        # Description
+        desc_label = QLabel("(Aktivitäten per Drag & Drop hier zuordnen)")
+        desc_font = QFont()
+        desc_font.setPointSize(9)
+        desc_font.setItalic(True)
+        desc_label.setFont(desc_font)
+        desc_label.setStyleSheet("color: #7f8c8d;")
+        layout.addWidget(desc_label)
 
         # Container for project widgets
         self.recent_projects_container = QWidget()
@@ -397,6 +406,15 @@ class MainWindow(QMainWindow):
         project_header.setFont(project_header_font)
         project_header.setStyleSheet("margin-top: 10px; margin-bottom: 5px;")
         self.stats_layout.addWidget(project_header)
+
+        # Project description
+        project_desc = QLabel("Drag & Drop zum Zuordnen")
+        project_desc_font = QFont()
+        project_desc_font.setPointSize(9)
+        project_desc_font.setItalic(True)
+        project_desc.setFont(project_desc_font)
+        project_desc.setStyleSheet("color: #7f8c8d; margin-bottom: 5px;")
+        self.stats_layout.addWidget(project_desc)
 
         # Group by project (use all activities, not filtered)
         project_times = {}
