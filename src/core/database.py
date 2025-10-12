@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -6,16 +7,35 @@ from typing import Any, Optional
 
 
 class Database:
-    def __init__(self):
-        """Initialize SQLite database connection"""
-        # Create database directory in user's home folder
-        db_dir = Path.home() / '.timetracker'
-        db_dir.mkdir(exist_ok=True)
+    def __init__(self, db_path: Optional[str] = None):
+        """Initialize SQLite database connection
 
-        # Database file path
-        db_path = db_dir / 'timetracker.db'
+        Args:
+            db_path: Optional custom database path. If None, uses default location
+                    or DATABASE_PATH environment variable.
+        """
+        # Determine database path
+        if db_path:
+            # Use provided path
+            final_db_path = Path(db_path)
+        else:
+            # Check environment variable first
+            env_db_path = os.getenv('DATABASE_PATH', '').strip()
+            if env_db_path:
+                final_db_path = Path(env_db_path)
+            else:
+                # Use default location
+                db_dir = Path.home() / '.timetracker'
+                db_dir.mkdir(exist_ok=True)
+                final_db_path = db_dir / 'timetracker.db'
 
-        self.conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        # Ensure parent directory exists
+        final_db_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Store the path for reference
+        self.db_path = str(final_db_path)
+
+        self.conn = sqlite3.connect(str(final_db_path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row  # Return rows as dictionaries
 
         # Enable foreign key constraints (must be done for each connection)

@@ -1,11 +1,14 @@
 import os
+from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QDialog,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QSpinBox,
@@ -30,6 +33,27 @@ class SettingsDialog(QDialog):
         self.setGeometry(200, 200, 500, 400)
 
         layout = QVBoxLayout(self)
+
+        # Database Settings
+        db_group = QGroupBox("Datenbank")
+        db_layout = QHBoxLayout()
+
+        self.db_path_edit = QLineEdit()
+        self.db_path_edit.setPlaceholderText("Standard: %USERPROFILE%\\.timetracker\\timetracker.db")
+        self.db_path_edit.setReadOnly(True)
+        db_layout.addWidget(self.db_path_edit)
+
+        browse_btn = QPushButton("Durchsuchen...")
+        browse_btn.clicked.connect(self.browse_database_path)
+        db_layout.addWidget(browse_btn)
+
+        reset_db_btn = QPushButton("Standard")
+        reset_db_btn.clicked.connect(self.reset_database_path)
+        reset_db_btn.setToolTip("Zurück zum Standard-Datenbankpfad")
+        db_layout.addWidget(reset_db_btn)
+
+        db_group.setLayout(db_layout)
+        layout.addWidget(db_group)
 
         # Tracking Settings
         tracking_group = QGroupBox("Tracking Einstellungen")
@@ -107,7 +131,8 @@ class SettingsDialog(QDialog):
             "• Merge-Gap (App): Wechsel zur gleichen App werden zusammengefasst<br>"
             "• Merge-Gap (Projekt): Noch aggressiveres Merging für Projekt-Aktivitäten<br>"
             "• Blacklist: Prozesse und Fenstertitel, die nicht getrackt werden sollen<br>"
-            "• Änderungen werden beim Speichern in .env geschrieben"
+            "• Änderungen werden beim Speichern in .env geschrieben<br>"
+            "• Datenbankpfad: Änderungen erfordern einen Neustart"
         )
         info_label.setWordWrap(True)
         layout.addWidget(info_label)
@@ -131,8 +156,34 @@ class SettingsDialog(QDialog):
 
         layout.addLayout(button_layout)
 
+    def browse_database_path(self):
+        """Open file dialog to select database path"""
+        default_path = str(Path.home() / '.timetracker' / 'timetracker.db')
+        current_path = self.db_path_edit.text() or default_path
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Datenbank-Pfad wählen",
+            current_path,
+            "SQLite Datenbank (*.db);;Alle Dateien (*.*)"
+        )
+
+        if file_path:
+            self.db_path_edit.setText(file_path)
+
+    def reset_database_path(self):
+        """Reset database path to default"""
+        self.db_path_edit.clear()
+
     def load_settings(self):
         """Load current settings from environment"""
+        # Load database path
+        db_path = os.getenv('DATABASE_PATH', '')
+        if db_path:
+            self.db_path_edit.setText(db_path)
+        else:
+            self.db_path_edit.clear()
+
         self.poll_interval_spin.setValue(int(os.getenv('POLL_INTERVAL', 2)))
         self.idle_threshold_spin.setValue(int(os.getenv('IDLE_THRESHOLD', 300)))
         self.min_duration_spin.setValue(int(os.getenv('MIN_ACTIVITY_DURATION', 10)))
@@ -179,6 +230,7 @@ class SettingsDialog(QDialog):
 
             # Update or add settings
             settings = {
+                'DATABASE_PATH': self.db_path_edit.text().strip(),
                 'POLL_INTERVAL': str(self.poll_interval_spin.value()),
                 'IDLE_THRESHOLD': str(self.idle_threshold_spin.value()),
                 'MIN_ACTIVITY_DURATION': str(self.min_duration_spin.value()),

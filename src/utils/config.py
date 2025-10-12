@@ -1,5 +1,6 @@
 """Configuration and constants"""
 import os
+from pathlib import Path
 
 # Default processes to ignore (system processes, not relevant for tracking)
 DEFAULT_IGNORED_PROCESSES = {
@@ -65,3 +66,10 @@ def should_ignore_activity(app_name, window_title=''):
         return True
 
     return False
+
+def get_database_path():
+    """Get database path from environment or return default"""
+    env_path = os.getenv('DATABASE_PATH', '').strip()
+    if env_path:
+        return env_path
+    return str(Path.home() / '.timetracker' / 'timetracker.db')
