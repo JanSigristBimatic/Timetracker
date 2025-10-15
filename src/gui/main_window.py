@@ -60,6 +60,8 @@ class ProjectDropWidget(QWidget):
         if event.mimeData().hasText():
             try:
                 activity_data = json.loads(event.mimeData().text())
+                print(f"DEBUG: Received {len(activity_data)} activities to drop")
+
                 # Assign all activities to this project
                 total_count = 0
                 for act_data in activity_data:
@@ -67,11 +69,14 @@ class ProjectDropWidget(QWidget):
                     duration = act_data['duration']
                     app_name = act_data['app_name']
 
+                    print(f"DEBUG: Processing activity - App: {app_name}, Start: {timestamp}, Duration: {duration}s")
+
                     # Use timerange assignment for merged activities
                     end_time = timestamp + timedelta(seconds=duration)
                     count = self.main_window.database.assign_activities_by_timerange(
                         timestamp, end_time, app_name, self.project_id
                     )
+                    print(f"DEBUG: Assigned {count} activities for this timerange")
                     total_count += count
 
                 print(f"Assigned {total_count} activities to project '{self.project_name}'")
@@ -214,6 +219,14 @@ class MainWindow(QMainWindow):
         projects_btn = QPushButton("Projekte")
         projects_btn.clicked.connect(self.open_project_manager)
         layout.addWidget(projects_btn)
+
+        # AI Assignment button
+        ai_assign_btn = QPushButton("🤖 KI-Zuordnung")
+        ai_assign_btn.clicked.connect(self.open_ai_assignment)
+        ai_assign_btn.setStyleSheet(
+            "background-color: #3498db; color: white; font-weight: bold;"
+        )
+        layout.addWidget(ai_assign_btn)
 
         # Export button
         export_btn = QPushButton("Export")
@@ -982,6 +995,15 @@ class MainWindow(QMainWindow):
         """Open settings dialog"""
         dialog = SettingsDialog(self)
         dialog.exec()
+
+    def open_ai_assignment(self):
+        """Öffnet KI-Zuordnungs-Dialog"""
+        from .assignment_suggestions import AssignmentSuggestionsDialog
+
+        dialog = AssignmentSuggestionsDialog(self.database, self)
+        if dialog.exec():
+            # Refresh nach Zuordnung
+            self.load_timeline()
 
     def eventFilter(self, obj, event):
         """Filter events to handle Ctrl+Wheel zoom without scrolling"""

@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 from PyQt6.QtCore import QRect, Qt, QMimeData
 from PyQt6.QtGui import QAction, QColor, QFont, QPainter, QPen, QDrag
-from PyQt6.QtWidgets import QMenu, QWidget
+from PyQt6.QtWidgets import QMenu, QWidget, QMessageBox
 
 from core.database_protocol import DatabaseProtocol
 from utils.config import should_ignore_activity
@@ -536,6 +536,17 @@ class TimelineWidget(QWidget):
             )
             menu.addAction(clear_action)
 
+        # Add separator before delete option
+        menu.addSeparator()
+
+        # Delete activities
+        delete_label = f"{len(activities_to_assign)} Aktivitäten löschen" if is_multi else "Aktivität löschen"
+        delete_action = QAction(delete_label, self)
+        delete_action.triggered.connect(
+            lambda: self.delete_activities(activities_to_assign)
+        )
+        menu.addAction(delete_action)
+
         menu.exec(self.mapToGlobal(pos))
 
     def assign_to_project(self, activity, project_id):
@@ -591,6 +602,75 @@ class TimelineWidget(QWidget):
                 widget.load_timeline()
                 break
             widget = widget.parent()
+
+    def delete_activities(self, activities):
+        """Delete activities with confirmation dialog"""
+        # Calculate total duration
+        total_duration = sum(act['duration'] for act in activities)
+        hours = total_duration // 3600
+        minutes = (total_duration % 3600) // 60
+
+        if hours > 0:
+            duration_str = f"{hours}h {minutes}m"
+        else:
+            duration_str = f"{minutes}m"
+
+        # Build confirmation message
+        if len(activities) == 1:
+            activity = activities[0]
+            timestamp = activity['timestamp'].strftime('%H:%M:%S')
+            message = (
+                f"Möchtest du diese Aktivität wirklich löschen?\n\n"
+                f"App: {activity['app_name']}\n"
+                f"Zeit: {timestamp}\n"
+                f"Dauer: {duration_str}"
+            )
+            title = "Aktivität löschen"
+        else:
+            message = (
+                f"Möchtest du wirklich {len(activities)} Aktivitäten löschen?\n\n"
+                f"Gesamtdauer: {duration_str}\n\n"
+                f"Diese Aktion kann nicht rückgängig gemacht werden!"
+            )
+            title = "Mehrere Aktivitäten löschen"
+
+        # Show confirmation dialog
+        reply = QMessageBox.question(
+            self,
+            title,
+            message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # Delete activities
+            total_count = 0
+
+            for activity in activities:
+                # Use the merged activity's time range to delete ALL activities in that range
+                start_time = activity['timestamp']
+                end_time = activity.get('end_time', start_time + timedelta(seconds=activity['duration']))
+                app_name = activity['app_name']
+
+                # Delete all activities in this time range for this app
+                count = self.database.delete_activities_by_timerange(
+                    start_time, end_time, app_name
+                )
+                total_count += count
+
+            print(f"Deleted {total_count} activities")
+
+            # Clear selection
+            self.selected_activities = []
+
+            # Find main window and refresh
+            widget = self
+            while widget is not None:
+                if hasattr(widget, 'load_timeline'):
+                    widget.load_timeline()
+                    break
+                widget = widget.parent()
 
     def select_all_activities(self, activities):
         """Select all given activities in the timeline"""

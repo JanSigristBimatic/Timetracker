@@ -154,6 +154,25 @@ class DatabaseProtocol(Protocol):
         """
         ...
 
+    def delete_activities_by_timerange(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        app_name: str,
+    ) -> int:
+        """
+        Delete all activities in a time range for a specific app
+
+        Args:
+            start_time: Start of the time range
+            end_time: End of the time range
+            app_name: Name of the application
+
+        Returns:
+            Number of activities deleted
+        """
+        ...
+
     def close(self) -> None:
         """Close database connection"""
         ...

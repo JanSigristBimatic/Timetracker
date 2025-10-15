@@ -376,6 +376,25 @@ class Database:
 
         return result[0] if result else None
 
+    def delete_activities_by_timerange(
+        self, start_time: datetime, end_time: datetime, app_name: str
+    ) -> int:
+        """Delete all activities in a time range for a specific app"""
+        with self._write_lock:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                DELETE FROM activities
+                WHERE timestamp >= ?
+                  AND timestamp <= ?
+                  AND app_name = ?
+            ''', (start_time, end_time, app_name))
+
+            rows_affected = cursor.rowcount
+            self.conn.commit()
+            cursor.close()
+
+        return rows_affected
+
     def close(self) -> None:
         """Close database connection"""
         if self.conn:
