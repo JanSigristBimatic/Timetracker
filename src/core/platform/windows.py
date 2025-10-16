@@ -59,6 +59,26 @@ class WindowsActivityTracker:
         return None
 
     @staticmethod
+    def is_audio_playing():
+        """Check if any audio is currently playing on the system"""
+        try:
+            from pycaw.pycaw import AudioUtilities
+
+            sessions = AudioUtilities.GetAllSessions()
+            for session in sessions:
+                volume = session.SimpleAudioVolume
+                if session.Process and volume.GetMasterVolume() > 0:
+                    # Check if session state is active
+                    state = session.State
+                    # AudioSessionStateActive = 1
+                    if state == 1:
+                        return True
+            return False
+        except Exception:
+            # If audio detection fails, return False (don't break idle detection)
+            return False
+
+    @staticmethod
     def get_idle_time():
         """Get system idle time in seconds"""
         try:

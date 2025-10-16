@@ -97,7 +97,10 @@ class ActivityTracker:
 
             # Check for idle time
             idle_time = self.platform_tracker.get_idle_time()
-            if idle_time > self.idle_threshold:
+            is_audio_playing = self.platform_tracker.is_audio_playing()
+
+            # Consider idle only if: no input AND no audio playing
+            if idle_time > self.idle_threshold and not is_audio_playing:
                 if self.current_activity and not self.current_activity.get('is_idle'):
                     # Mark as idle
                     self._save_current_activity(is_idle=True)
