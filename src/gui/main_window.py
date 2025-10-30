@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 import json
 
 from PyQt6.QtCore import QDate, QEvent, Qt, QTimer
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QFontMetrics
 from PyQt6.QtWidgets import (
     QComboBox,
     QDateEdit,
@@ -297,15 +297,27 @@ class MainWindow(QMainWindow):
             # Create drop widget for each project
             project_widget = ProjectDropWidget(project['id'], project['name'], self)
             project_widget.setFixedHeight(30)
+            project_widget.setMinimumWidth(80)
+            project_widget.setMaximumWidth(150)
             project_widget.setStyleSheet(
                 f"background-color: {project['color']}; "
                 "border-radius: 5px; padding: 5px 10px; color: white; font-weight: bold;"
             )
 
-            project_label = QLabel(project['name'])
+            project_label = QLabel()
             project_label.setStyleSheet("color: white; font-weight: bold;")
             project_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             project_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            project_label.setWordWrap(False)
+
+            # Elide text if too long
+            label_font = project_label.font()
+            label_font.setBold(True)
+            project_label.setFont(label_font)
+            fm = QFontMetrics(label_font)
+            elided_name = fm.elidedText(project['name'], Qt.TextElideMode.ElideRight, 130)
+            project_label.setText(elided_name)
+            project_label.setToolTip(project['name'])
 
             project_layout = QHBoxLayout(project_widget)
             project_layout.setContentsMargins(5, 0, 5, 0)
@@ -350,8 +362,8 @@ class MainWindow(QMainWindow):
         """Create statistics sidebar"""
         sidebar = QFrame()
         sidebar.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
-        sidebar.setMaximumWidth(450)
-        sidebar.setMinimumWidth(400)
+        sidebar.setMaximumWidth(550)
+        sidebar.setMinimumWidth(500)
 
         layout = QVBoxLayout(sidebar)
 
@@ -373,7 +385,7 @@ class MainWindow(QMainWindow):
         # Stats content (scrollable)
         stats_scroll = QScrollArea()
         stats_scroll.setWidgetResizable(True)
-        stats_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        stats_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
         stats_widget = QWidget()
         self.stats_layout = QVBoxLayout(stats_widget)
@@ -479,22 +491,26 @@ class MainWindow(QMainWindow):
             color_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             project_layout.addWidget(color_label)
 
-            # Project name
+            # Project name (full text, scrollable)
             name_label = QLabel(project["name"])
             name_font = QFont()
             name_font.setPointSize(11)
             name_font.setBold(True)
             name_label.setFont(name_font)
             name_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            name_label.setWordWrap(False)
+            name_label.setTextFormat(Qt.TextFormat.PlainText)
+            # Allow full width, scrolling will handle overflow
             project_layout.addWidget(name_label, stretch=1)
 
-            # Time
+            # Time (ensure it's always visible)
             time_label = QLabel(f"{hours:.1f}h ({percentage:.0f}%)")
             time_font = QFont()
             time_font.setPointSize(11)
             time_label.setFont(time_font)
             time_label.setAlignment(Qt.AlignmentFlag.AlignRight)
             time_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            time_label.setMinimumWidth(120)
             project_layout.addWidget(time_label)
 
             self.stats_layout.addWidget(project_widget)
