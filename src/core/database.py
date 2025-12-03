@@ -269,6 +269,9 @@ class Database:
 
     def assign_multiple_activities_to_project(self, activity_ids: list[int], project_id: int) -> int:
         """Assign multiple activities to a project"""
+        if not activity_ids:
+            return 0
+
         with self._write_lock:
             cursor = self.conn.cursor()
             placeholders = ','.join('?' * len(activity_ids))

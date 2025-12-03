@@ -41,7 +41,7 @@ class Exporter:
             for activity in activities:
                 timestamp = activity['timestamp']
                 duration_minutes = round(activity['duration'] / 60, 2)
-                end_time = timestamp + datetime.timedelta(seconds=activity['duration'])
+                end_time = timestamp + timedelta(seconds=activity['duration'])
 
                 project_name = ''
                 if activity.get('project_id'):

@@ -5,31 +5,51 @@ Lernt aus bisherigen Zuordnungen und schlägt automatisch Projekte vor.
 Verwendet Pattern-Matching und statistische Analyse.
 """
 
+import logging
+import re
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import Optional, Any
-import re
+from typing import Any, Optional
 
 from core.database_protocol import DatabaseProtocol
 
+logger = logging.getLogger(__name__)
+
 
 class SmartProjectAssigner:
-    """Intelligente Projektzuordnung basierend auf Lernmustern"""
+    """Intelligente Projektzuordnung basierend auf Lernmustern.
+
+    Diese Klasse analysiert historische Projektzuordnungen und lernt
+    Muster, um automatische Zuordnungsvorschläge zu generieren.
+
+    Attributes:
+        database: Datenbankverbindung für Aktivitätsabfragen
+        patterns: Gelernte Zuordnungsmuster
+        app_project_map: Mapping von App-Namen zu Projekten
+        keyword_project_map: Mapping von Keywords zu Projekten
+    """
 
     def __init__(self, database: DatabaseProtocol):
+        """Initialisiert den SmartProjectAssigner.
+
+        Args:
+            database: Datenbankinstanz für Aktivitätsabfragen
+        """
         self.database = database
-        self.patterns = {}  # Gelernte Muster
-        self.app_project_map = {}  # App -> Projekt Mapping
-        self.keyword_project_map = {}  # Keywords -> Projekt Mapping
+        self.patterns: dict = {}
+        self.app_project_map: dict[str, int] = {}
+        self.keyword_project_map: dict[str, int] = {}
 
     def learn_from_history(self, days_back: int = 90) -> None:
-        """
-        Lernt aus historischen Zuordnungen
+        """Lernt aus historischen Zuordnungen.
+
+        Analysiert bereits zugeordnete Aktivitäten und erstellt
+        Muster für App- und Keyword-basierte Zuordnungen.
 
         Args:
             days_back: Anzahl Tage zurück zum Lernen
         """
-        print(f"[LEARN] Analysiere Aktivitäten der letzten {days_back} Tage...")
+        logger.info(f"Analysiere Aktivitäten der letzten {days_back} Tage...")
 
         # Hole alle Aktivitäten mit Projektzuordnung
         start_date = datetime.now() - timedelta(days=days_back)
@@ -38,7 +58,7 @@ class SmartProjectAssigner:
         # Filtere nur zugeordnete Aktivitäten
         assigned = [a for a in activities if a.get("project_id")]
 
-        print(f"[LEARN] {len(assigned)} zugeordnete Aktivitäten gefunden")
+        logger.info(f"{len(assigned)} zugeordnete Aktivitäten gefunden")
 
         # Lerne App -> Projekt Muster
         app_projects = defaultdict(lambda: defaultdict(int))
@@ -57,7 +77,7 @@ class SmartProjectAssigner:
             best_project = max(project_durations.items(), key=lambda x: x[1])
             self.app_project_map[app_name] = best_project[0]
 
-        print(f"[LEARN] {len(self.app_project_map)} App-Muster gelernt")
+        logger.info(f"{len(self.app_project_map)} App-Muster gelernt")
 
         # Lerne Keyword -> Projekt Muster aus Fenstertiteln
         keyword_projects = defaultdict(lambda: defaultdict(int))
@@ -82,7 +102,7 @@ class SmartProjectAssigner:
                 if best_project[1] / total_time > 0.6:
                     self.keyword_project_map[keyword] = best_project[0]
 
-        print(f"[LEARN] {len(self.keyword_project_map)} Keyword-Muster gelernt")
+        logger.info(f"{len(self.keyword_project_map)} Keyword-Muster gelernt")
 
     def suggest_project(self, activity: dict[str, Any]) -> Optional[int]:
         """
@@ -182,7 +202,7 @@ class SmartProjectAssigner:
 
         unassigned = [a for a in activities if not a.get("project_id")]
 
-        print(f"[AUTO-ASSIGN] {len(unassigned)} nicht zugeordnete Aktivitäten gefunden")
+        logger.info(f"{len(unassigned)} nicht zugeordnete Aktivitäten gefunden")
 
         stats = {
             "total_unassigned": len(unassigned),

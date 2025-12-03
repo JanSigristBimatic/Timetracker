@@ -1,8 +1,17 @@
-"""Icon extraction and caching for Windows apps"""
+"""Icon extraction and caching for Windows apps.
+
+This module provides functionality to extract and cache application icons
+from Windows executables for display in the GUI.
+"""
+
+import logging
 import os
 import sys
+from typing import Optional
 
 from PyQt6.QtGui import QImage, QPixmap
+
+logger = logging.getLogger(__name__)
 
 if sys.platform == 'win32':
     import io
@@ -13,13 +22,29 @@ if sys.platform == 'win32':
 
 
 class IconCache:
-    """Cache for app icons"""
+    """Cache for application icons.
+
+    This class extracts icons from Windows executables and caches them
+    for efficient retrieval. Icons are stored as QPixmap objects.
+
+    Attributes:
+        cache: Dictionary mapping cache keys to QPixmap objects
+    """
 
     def __init__(self):
-        self.cache = {}
+        """Initialize empty icon cache."""
+        self.cache: dict[str, QPixmap] = {}
 
-    def get_icon_pixmap(self, exe_path, size=16):
-        """Get icon pixmap for executable path"""
+    def get_icon_pixmap(self, exe_path: Optional[str], size: int = 16) -> Optional[QPixmap]:
+        """Get icon pixmap for executable path.
+
+        Args:
+            exe_path: Path to the executable file
+            size: Desired icon size in pixels (default: 16)
+
+        Returns:
+            QPixmap of the icon, or None if extraction fails
+        """
         if not exe_path or not os.path.exists(exe_path):
             return None
 
@@ -36,23 +61,38 @@ class IconCache:
 
         return None
 
-    def _extract_windows_icon(self, exe_path, size):
-        """Extract icon from Windows executable"""
+    def _extract_windows_icon(self, exe_path: str, size: int) -> Optional[QPixmap]:
+        """Extract icon from Windows executable.
+
+        Args:
+            exe_path: Path to the executable file
+            size: Desired icon size in pixels
+
+        Returns:
+            QPixmap of the extracted icon, or None if extraction fails
+
+        Note:
+            This method properly cleans up all Win32 handles even on error.
+        """
+        large_icons: list = []
+        small_icons: list = []
+        hicon = None
+        hdc = None
+        hdc_mem = None
+        hbmp = None
+
         try:
             # Extract icons from exe
-            large, small = win32gui.ExtractIconEx(exe_path, 0)
+            large_icons, small_icons = win32gui.ExtractIconEx(exe_path, 0)
 
-            if not small and not large:
+            if not small_icons and not large_icons:
                 return None
 
             # Use small icon if available
-            hicon = small[0] if small else (large[0] if large else None)
+            hicon = small_icons[0] if small_icons else (large_icons[0] if large_icons else None)
 
             if not hicon:
                 return None
-
-            # Get icon info
-            info = win32gui.GetIconInfo(hicon)
 
             # Create device context
             hdc = win32ui.CreateDCFromHandle(win32gui.GetDC(0))
@@ -76,21 +116,47 @@ class IconCache:
             qimage.loadFromData(img_byte_arr.read())
             pixmap = QPixmap.fromImage(qimage)
 
-            # Cleanup
-            win32gui.DeleteObject(hbmp.GetHandle())
-            hdc_mem.DeleteDC()
-            hdc.DeleteDC()
-            win32gui.DestroyIcon(hicon)
-
-            # Cleanup all icons
-            for icon in (large or []) + (small or []):
-                try:
-                    win32gui.DestroyIcon(icon)
-                except:
-                    pass
-
             return pixmap
 
-        except Exception as e:
-            print(f"Icon extraction error for {exe_path}: {e}")
+        except (OSError, AttributeError, ValueError) as e:
+            logger.warning(f"Icon extraction failed for {exe_path}: {e}")
             return None
+
+        except Exception as e:
+            logger.error(f"Unexpected error extracting icon for {exe_path}: {e}")
+            return None
+
+        finally:
+            # Cleanup Win32 handles in reverse order of creation
+            if hbmp:
+                try:
+                    win32gui.DeleteObject(hbmp.GetHandle())
+                except (OSError, AttributeError):
+                    pass
+
+            if hdc_mem:
+                try:
+                    hdc_mem.DeleteDC()
+                except (OSError, AttributeError):
+                    pass
+
+            if hdc:
+                try:
+                    hdc.DeleteDC()
+                except (OSError, AttributeError):
+                    pass
+
+            # Cleanup all extracted icons
+            for icon in (large_icons or []) + (small_icons or []):
+                try:
+                    win32gui.DestroyIcon(icon)
+                except (OSError, TypeError):
+                    pass
+
+    def clear(self) -> None:
+        """Clear the icon cache."""
+        self.cache.clear()
+
+    def __len__(self) -> int:
+        """Return number of cached icons."""
+        return len(self.cache)

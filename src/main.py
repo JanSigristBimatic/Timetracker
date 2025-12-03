@@ -1,10 +1,11 @@
+﻿import logging
 import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QAction, QIcon
-from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+from PyQt6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from core.database import Database
 from core.tracker import ActivityTracker
@@ -14,9 +15,26 @@ from gui.main_window import MainWindow
 env_path = Path(__file__).parent.parent / '.env'
 load_dotenv(env_path)
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+    ]
+)
+logger = logging.getLogger(__name__)
+
 
 class TimeTrackerApp:
-    """Main application class"""
+    """Main application class for TimeTracker.
+
+    This class initializes and manages the main application components:
+    - Database connection
+    - Activity tracker
+    - Main window
+    - System tray icon
+    """
 
     def __init__(self):
         self.app = QApplication(sys.argv)
@@ -26,9 +44,15 @@ class TimeTrackerApp:
         # Initialize database
         try:
             self.database = Database()
+            logger.info("Database connection established")
         except Exception as e:
-            print(f"Database connection failed: {e}")
-            print("Please ensure PostgreSQL is running and configured correctly.")
+            logger.critical(f"Database connection failed: {e}")
+            QMessageBox.critical(
+                None,
+                "Datenbankfehler",
+                f"Datenbankverbindung fehlgeschlagen: {e}\n\n"
+                "Bitte stellen Sie sicher, dass die Datenbank korrekt konfiguriert ist."
+            )
             sys.exit(1)
 
         # Initialize activity tracker
@@ -144,3 +168,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+

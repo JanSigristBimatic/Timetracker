@@ -1,34 +1,92 @@
 """
-Automatisierungs-Script für tägliche Rapporten und Projektzuordnung
+Automatisierungsscript für tägliche Rapporte und Projektzuordnung.
 
-Kann manuell ausgeführt oder via Task Scheduler automatisiert werden.
+Kann manuell ausgeführt oder über den Task Scheduler automatisiert werden.
 """
 
-import sys
-from pathlib import Path
-from datetime import datetime, timedelta
-import argparse
+from __future__ import annotations
 
-# Add src to path
-src_path = Path(__file__).parent / "src"
-sys.path.insert(0, str(src_path))
+import argparse
+import os
+import sys
+from collections import Counter
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Optional
+
+# Add project root to path so the script also works when executed directly
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.database import Database
 from utils.smart_project_assigner import SmartProjectAssigner
-from utils.daily_report_generator import DailyReportGenerator
+
+
+class DailyReportGenerator:
+    """Minimal Report-Generator, der eine einfache TXT-Zusammenfassung erstellt."""
+
+    def __init__(self, database: Database):
+        self.database = database
+        self.output_dir = Path.home() / ".timetracker" / "reports"
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    def generate_daily_report(self, date: Optional[datetime] = None, auto_open: bool = False):
+        """Erzeuge einen einfachen Tagesrapport als Textdatei."""
+        if date is None:
+            date = datetime.now()
+
+        start = datetime.combine(date.date(), datetime.min.time())
+        end = datetime.combine(date.date(), datetime.max.time())
+
+        activities = self.database.get_activities(start_date=start, end_date=end)
+        if not activities:
+            return None
+
+        total_seconds = sum(a["duration"] for a in activities)
+        active_seconds = sum(a["duration"] for a in activities if not a.get("is_idle"))
+        idle_seconds = total_seconds - active_seconds
+
+        by_app = Counter()
+        counts = Counter()
+        for act in activities:
+            by_app[act["app_name"]] += act["duration"]
+            counts[act["app_name"]] += 1
+
+        lines = [
+            f"TimeTracker Tagesrapport {date.date()}",
+            "-" * 40,
+            f"Anzahl Aktivitäten: {len(activities)}",
+            f"Gesamt: {total_seconds / 3600:.2f} h",
+            f"Aktiv: {active_seconds / 3600:.2f} h",
+            f"Idle: {idle_seconds / 3600:.2f} h",
+            "",
+            "Top 5 Programme (nach Dauer):",
+        ]
+
+        for app, _ in by_app.most_common(5):
+            lines.append(
+                f"- {app}: {by_app[app] / 3600:.2f} h ({counts[app]} Aktivitäten)"
+            )
+
+        report_path = self.output_dir / f"rapport_{date.date()}.txt"
+        report_path.write_text("\n".join(lines), encoding="utf-8")
+
+        if auto_open:
+            try:
+                os.startfile(report_path)  # type: ignore[attr-defined]
+            except Exception:
+                # Öffnen ist optional; Fehler hier dürfen den Report nicht verhindern
+                pass
+
+        return report_path
 
 
 def auto_assign_projects(
     database: Database, days_back: int = 1, min_confidence: float = 0.7, dry_run: bool = False
 ):
     """
-    Automatische Projektzuordnung
-
-    Args:
-        database: Datenbankinstanz
-        days_back: Tage zurück zum Analysieren
-        min_confidence: Minimale Konfidenz (0.0 - 1.0)
-        dry_run: Nur simulieren, nicht zuordnen
+    Automatische Projektzuordnung.
     """
     print("=" * 80)
     print("AUTOMATISCHE PROJEKTZUORDNUNG")
@@ -66,7 +124,7 @@ def auto_assign_projects(
                 f"  {assignment['app_name']:<20} -> {assignment['project']:<20} ({assignment['confidence']})"
             )
             if assignment["window_title"]:
-                print(f"    └─ {assignment['window_title']}")
+                print(f"    ↳ {assignment['window_title']}")
 
         if len(stats["assignments"]) > 10:
             print(f"  ... und {len(stats['assignments']) - 10} weitere")
@@ -75,14 +133,9 @@ def auto_assign_projects(
     return stats
 
 
-def generate_daily_report(database: Database, date: datetime = None, auto_open: bool = True):
+def generate_daily_report(database: Database, date: Optional[datetime] = None, auto_open: bool = True):
     """
-    Generiert täglichen Rapport
-
-    Args:
-        database: Datenbankinstanz
-        date: Datum (default: heute)
-        auto_open: Rapport automatisch öffnen
+    Generiert täglichen Rapport.
     """
     print("=" * 80)
     print("TAGESRAPPORT GENERIERUNG")
@@ -103,7 +156,7 @@ def generate_daily_report(database: Database, date: datetime = None, auto_open: 
         print(f"\n✓ Rapport erfolgreich erstellt: {filepath}")
         print(f"  Dateigröße: {filepath.stat().st_size / 1024:.1f} KB")
     else:
-        print("\n✗ Keine Aktivitäten für diesen Tag gefunden")
+        print("\nℹ Keine Aktivitäten für diesen Tag gefunden")
 
     print("\n" + "=" * 80)
     return filepath
@@ -112,7 +165,7 @@ def generate_daily_report(database: Database, date: datetime = None, auto_open: 
 def main():
     """Hauptfunktion"""
     parser = argparse.ArgumentParser(
-        description="TimeTracker Automatisierung - Projektzuordnung und Rapporten"
+        description="TimeTracker Automatisierung - Projektzuordnung und Rapporte"
     )
 
     parser.add_argument(

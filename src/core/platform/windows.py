@@ -1,17 +1,51 @@
+"""Windows-specific activity tracking using Win32 API.
+
+This module provides Windows-specific functionality for tracking user activity,
+including active window detection, idle time measurement, and audio playback status.
+"""
+
+import ctypes
+import logging
 import re
 from datetime import datetime
+from typing import Optional
 
 import psutil
 import win32gui
 import win32process
 
+logger = logging.getLogger(__name__)
+
+
+class LASTINPUTINFO(ctypes.Structure):
+    """Windows LASTINPUTINFO structure for idle time detection."""
+
+    _fields_ = [
+        ('cbSize', ctypes.c_uint),
+        ('dwTime', ctypes.c_uint),
+    ]
+
 
 class WindowsActivityTracker:
-    """Windows-specific activity tracking using Win32 API"""
+    """Windows-specific activity tracking using Win32 API.
+
+    This class provides methods to track user activity on Windows systems,
+    including active window detection, browser tab tracking, idle time
+    measurement, and audio playback detection.
+    """
 
     @staticmethod
-    def get_active_window():
-        """Get currently active window information"""
+    def get_active_window() -> Optional[dict]:
+        """Get currently active window information.
+
+        Returns:
+            Dictionary with window information containing:
+                - app_name: Name of the application executable
+                - window_title: Title of the active window
+                - timestamp: Current datetime
+                - process_path: Full path to the executable
+            Returns None if no window is active or on error.
+        """
         try:
             hwnd = win32gui.GetForegroundWindow()
             if not hwnd:
@@ -34,12 +68,33 @@ class WindowsActivityTracker:
                 'timestamp': datetime.now(),
                 'process_path': process.exe()
             }
-        except Exception:
+
+        except psutil.NoSuchProcess:
+            # Process terminated before we could get info
+            return None
+        except psutil.AccessDenied:
+            # No permission to access process
+            return None
+        except OSError as e:
+            # Win32 API error (e.g., window closed)
+            logger.debug(f"Win32 error getting active window: {e}")
+            return None
+        except Exception as e:
+            logger.warning(f"Unexpected error getting active window: {e}")
             return None
 
     @staticmethod
-    def _get_browser_info(app_name, window_title):
-        """Extract browser tab information from window title"""
+    def _get_browser_info(app_name: str, window_title: str) -> Optional[str]:
+        """Extract browser tab information from window title.
+
+        Args:
+            app_name: Name of the application executable
+            window_title: Original window title
+
+        Returns:
+            Extracted page title for browsers, or None if not a browser
+            or title extraction fails.
+        """
         app_lower = app_name.lower()
 
         # Chrome, Edge, Brave
@@ -59,8 +114,14 @@ class WindowsActivityTracker:
         return None
 
     @staticmethod
-    def is_audio_playing():
-        """Check if any audio is currently playing on the system"""
+    def is_audio_playing() -> bool:
+        """Check if any audio is currently playing on the system.
+
+        Uses Windows Core Audio API via pycaw to detect active audio sessions.
+
+        Returns:
+            True if audio is playing, False otherwise or on error.
+        """
         try:
             from pycaw.pycaw import AudioUtilities
 
@@ -74,27 +135,42 @@ class WindowsActivityTracker:
                     if state == 1:
                         return True
             return False
-        except Exception:
-            # If audio detection fails, return False (don't break idle detection)
+
+        except ImportError:
+            logger.warning("pycaw not available for audio detection")
+            return False
+        except OSError as e:
+            # COM error or audio service unavailable
+            logger.debug(f"Audio detection error: {e}")
+            return False
+        except Exception as e:
+            logger.warning(f"Unexpected error in audio detection: {e}")
             return False
 
     @staticmethod
-    def get_idle_time():
-        """Get system idle time in seconds"""
+    def get_idle_time() -> float:
+        """Get system idle time in seconds.
+
+        Uses Windows GetLastInputInfo API to determine how long since
+        the last user input (keyboard/mouse).
+
+        Returns:
+            Idle time in seconds, or 0.0 on error.
+        """
         try:
-            import ctypes
+            last_input_info = LASTINPUTINFO()
+            last_input_info.cbSize = ctypes.sizeof(last_input_info)
 
-            class LASTINPUTINFO(ctypes.Structure):
-                _fields_ = [
-                    ('cbSize', ctypes.c_uint),
-                    ('dwTime', ctypes.c_uint),
-                ]
+            if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(last_input_info)):
+                logger.debug("GetLastInputInfo failed")
+                return 0.0
 
-            lastInputInfo = LASTINPUTINFO()
-            lastInputInfo.cbSize = ctypes.sizeof(lastInputInfo)
-            ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lastInputInfo))
-
-            millis = ctypes.windll.kernel32.GetTickCount() - lastInputInfo.dwTime
+            millis = ctypes.windll.kernel32.GetTickCount() - last_input_info.dwTime
             return millis / 1000.0
-        except:
-            return 0
+
+        except OSError as e:
+            logger.debug(f"Error getting idle time: {e}")
+            return 0.0
+        except Exception as e:
+            logger.warning(f"Unexpected error getting idle time: {e}")
+            return 0.0
