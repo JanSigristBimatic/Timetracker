@@ -85,6 +85,14 @@ class MockDatabase(DatabaseProtocol):
 
         return project_id
 
+    def delete_project(self, project_id: int) -> None:
+        """Delete a project by ID"""
+        self.projects = [p for p in self.projects if p["id"] != project_id]
+        # Set project_id to None for activities assigned to this project
+        for activity in self.activities:
+            if activity.get("project_id") == project_id:
+                activity["project_id"] = None
+
     def get_projects(self) -> list[dict[str, Any]]:
         """Get all projects"""
         return sorted(self.projects, key=lambda x: x["name"])
@@ -96,6 +104,17 @@ class MockDatabase(DatabaseProtocol):
                 activity["project_id"] = project_id
                 break
 
+    def assign_multiple_activities_to_project(
+        self, activity_ids: list[int], project_id: int
+    ) -> int:
+        """Assign multiple activities to a project"""
+        count = 0
+        for activity in self.activities:
+            if activity["id"] in activity_ids:
+                activity["project_id"] = project_id
+                count += 1
+        return count
+
     def assign_activities_by_timerange(
         self, start_time: datetime, end_time: datetime, app_name: str, project_id: int
     ) -> int:
@@ -104,7 +123,7 @@ class MockDatabase(DatabaseProtocol):
         for activity in self.activities:
             if (
                 activity["timestamp"] >= start_time
-                and activity["timestamp"] <= end_time
+                and activity["timestamp"] < end_time
                 and activity["app_name"] == app_name
             ):
                 activity["project_id"] = project_id
@@ -118,6 +137,32 @@ class MockDatabase(DatabaseProtocol):
     def set_setting(self, key: str, value: str) -> None:
         """Set setting value"""
         self.settings[key] = value
+
+    def get_social_media_project_id(self) -> int | None:
+        """Get the ID of the Social Media project"""
+        for project in self.projects:
+            if project["name"] == "Social Media":
+                return project["id"]
+        return None
+
+    def get_recently_used_projects(self, limit: int = 10) -> list[dict[str, Any]]:
+        """Get recently used projects"""
+        # For mock, just return all projects up to limit
+        return self.projects[:limit]
+
+    def delete_activities_by_timerange(
+        self, start_time: datetime, end_time: datetime, app_name: str
+    ) -> int:
+        """Delete all activities in a time range for a specific app"""
+        to_delete = [
+            a for a in self.activities
+            if a["timestamp"] >= start_time
+            and a["timestamp"] < end_time
+            and a["app_name"] == app_name
+        ]
+        for activity in to_delete:
+            self.activities.remove(activity)
+        return len(to_delete)
 
     def close(self) -> None:
         """Close database (no-op for mock)"""

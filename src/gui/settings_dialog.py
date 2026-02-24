@@ -216,8 +216,8 @@ class SettingsDialog(QDialog):
     def save_settings(self):
         """Save settings to .env file"""
         try:
-            # Read current .env file
-            env_path = '.env'
+            # Read current .env file (use project root, not CWD)
+            env_path = str(Path(__file__).resolve().parent.parent.parent / '.env')
             env_lines = []
 
             if os.path.exists(env_path):

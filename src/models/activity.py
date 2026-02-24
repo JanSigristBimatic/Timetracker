@@ -3,7 +3,7 @@
 This module defines the Activity dataclass for representing tracked activities.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 

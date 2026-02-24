@@ -134,10 +134,7 @@ class ProjectManagerDialog(QDialog):
 
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                cursor = self.database.conn.cursor()
-                cursor.execute('DELETE FROM projects WHERE id = ?', (project_id,))
-                self.database.conn.commit()
-                cursor.close()
+                self.database.delete_project(project_id)
                 self.load_projects()
             except Exception as e:
                 QMessageBox.critical(self, "Fehler", f"Projekt konnte nicht gelöscht werden: {e}")

@@ -95,30 +95,30 @@ class TestDeleteActivities:
 
     def test_delete_only_matching_app(self, temp_db):
         """Test that deletion only affects matching app"""
-        # Create activities for different apps in same timerange
-        start_time = datetime(2024, 1, 15, 10, 0)
-        end_time = datetime(2024, 1, 15, 11, 0)
-
+        # Create activities for different apps in sequential timeranges
+        # (same timerange would trigger overlap prevention)
         temp_db.save_activity(
             "Code.exe",
             "main.py",
-            start_time,
-            end_time,
+            datetime(2024, 1, 15, 10, 0),
+            datetime(2024, 1, 15, 10, 30),
         )
         temp_db.save_activity(
             "chrome.exe",
             "GitHub",
-            start_time,
-            end_time,
+            datetime(2024, 1, 15, 10, 30),
+            datetime(2024, 1, 15, 11, 0),
         )
 
         # Verify both activities exist
         activities = temp_db.get_activities()
         assert len(activities) == 2
 
-        # Delete only Code.exe activities
+        # Delete Code.exe in full range - should only affect Code.exe
         deleted_count = temp_db.delete_activities_by_timerange(
-            start_time, end_time, "Code.exe"
+            datetime(2024, 1, 15, 10, 0),
+            datetime(2024, 1, 15, 11, 0),
+            "Code.exe"
         )
 
         assert deleted_count == 1

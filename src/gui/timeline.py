@@ -1,5 +1,8 @@
+import logging
 import os
 from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
 
 from PyQt6.QtCore import QRect, Qt, QMimeData
 from PyQt6.QtGui import QAction, QColor, QFont, QPainter, QPen, QDrag
@@ -104,6 +107,12 @@ class TimelineWidget(QWidget):
         # Merge consecutive activities from the same app
         self.activities = self._merge_activities(filtered)
         self.current_date = date
+
+        # Cache projects for paint performance (avoids DB query per activity)
+        self._cached_projects = {
+            p['id']: p for p in self.database.get_projects()
+        }
+
         self.update()
 
     def _merge_activities(self, activities):
@@ -279,9 +288,8 @@ class TimelineWidget(QWidget):
 
             # Check if activity has project assignment
             if activity.get('project_id'):
-                # Get project color from database
-                projects = self.database.get_projects()
-                project = next((p for p in projects if p['id'] == activity['project_id']), None)
+                # Get project color from cache
+                project = self._cached_projects.get(activity['project_id'])
                 if project and project.get('color'):
                     color = QColor(project['color'])
                 else:
@@ -329,8 +337,7 @@ class TimelineWidget(QWidget):
                 # Get project name if assigned
                 project_name = ''
                 if activity.get('project_id'):
-                    projects = self.database.get_projects()
-                    project = next((p for p in projects if p['id'] == activity['project_id']), None)
+                    project = self._cached_projects.get(activity['project_id'])
                     if project:
                         project_name = project['name']
 
@@ -561,7 +568,7 @@ class TimelineWidget(QWidget):
             start_time, end_time, app_name, project_id
         )
 
-        print(f"Assigned {count} activities to project")
+        logger.info(f"Assigned {count} activities to project")
 
         # Clear selection
         self.selected_activities = []
@@ -590,7 +597,7 @@ class TimelineWidget(QWidget):
             )
             total_count += count
 
-        print(f"Assigned {total_count} activities to project")
+        logger.info(f"Assigned {total_count} activities to project")
 
         # Clear selection
         self.selected_activities = []
@@ -659,7 +666,7 @@ class TimelineWidget(QWidget):
                 )
                 total_count += count
 
-            print(f"Deleted {total_count} activities")
+            logger.info(f"Deleted {total_count} activities")
 
             # Clear selection
             self.selected_activities = []
@@ -731,8 +738,7 @@ class TimelineWidget(QWidget):
 
         # Add project if assigned
         if activity.get('project_id'):
-            projects = self.database.get_projects()
-            project = next((p for p in projects if p['id'] == activity['project_id']), None)
+            project = self._cached_projects.get(activity['project_id'])
             if project:
                 tooltip += f"<b>Projekt:</b> {project['name']}<br>"
 

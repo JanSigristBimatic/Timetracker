@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.utils.social_media_detector import SocialMediaDetector
+from utils.social_media_detector import SocialMediaDetector
 
 
 class TestSocialMediaDetector:

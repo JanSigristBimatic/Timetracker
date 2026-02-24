@@ -1,7 +1,10 @@
+import logging
 from datetime import datetime, timedelta
 import json
 
 from PyQt6.QtCore import QDate, QEvent, Qt, QTimer
+
+logger = logging.getLogger(__name__)
 from PyQt6.QtGui import QFont, QFontMetrics
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -60,7 +63,7 @@ class ProjectDropWidget(QWidget):
         if event.mimeData().hasText():
             try:
                 activity_data = json.loads(event.mimeData().text())
-                print(f"DEBUG: Received {len(activity_data)} activities to drop")
+                logger.debug(f"Received {len(activity_data)} activities to drop")
 
                 # Assign all activities to this project
                 total_count = 0
@@ -69,26 +72,24 @@ class ProjectDropWidget(QWidget):
                     duration = act_data['duration']
                     app_name = act_data['app_name']
 
-                    print(f"DEBUG: Processing activity - App: {app_name}, Start: {timestamp}, Duration: {duration}s")
+                    logger.debug(f"Processing activity - App: {app_name}, Start: {timestamp}, Duration: {duration}s")
 
                     # Use timerange assignment for merged activities
                     end_time = timestamp + timedelta(seconds=duration)
                     count = self.main_window.database.assign_activities_by_timerange(
                         timestamp, end_time, app_name, self.project_id
                     )
-                    print(f"DEBUG: Assigned {count} activities for this timerange")
+                    logger.debug(f"Assigned {count} activities for this timerange")
                     total_count += count
 
-                print(f"Assigned {total_count} activities to project '{self.project_name}'")
+                logger.info(f"Assigned {total_count} activities to project '{self.project_name}'")
 
                 # Refresh timeline
                 self.main_window.load_timeline()
 
                 event.acceptProposedAction()
             except Exception as e:
-                print(f"Error dropping activities: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.error(f"Error dropping activities: {e}", exc_info=True)
 
 
 class MainWindow(QMainWindow):

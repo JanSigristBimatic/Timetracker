@@ -10,6 +10,9 @@ TimeTracker ist eine intelligente Zeiterfassungsanwendung, die automatisch verfo
 
 - **Automatisches Activity Tracking** - Erfasst aktive Anwendungen und Fenstertitel
 - **Projektmanagement** - Zuordnung von Aktivitäten zu Projekten
+- **Intelligente Projektzuweisung** - KI-gestützte Vorschläge für Projektzuordnungen
+- **Social Media Erkennung** - Automatische Erkennung von Social Media Nutzung
+- **Tagesberichte** - Automatische Generierung von Tagesberichten
 - **Timeline-Visualisierung** - Grafische Darstellung Ihrer täglichen Aktivitäten
 - **Export-Funktionen** - Datenexport in Excel, PDF und CSV
 - **System Tray Integration** - Läuft diskret im Hintergrund
@@ -32,7 +35,7 @@ TimeTracker ist eine intelligente Zeiterfassungsanwendung, die automatisch verfo
 ### 1. Repository klonen
 
 ```bash
-git clone https://github.com/[username]/Timetracker.git
+git clone https://github.com/JanSigristBimatic/Timetracker.git
 cd Timetracker
 ```
 
@@ -83,27 +86,39 @@ python src/main.py
 ```
 Timetracker/
 ├── src/
-│   ├── main.py                 # Einstiegspunkt der Anwendung
+│   ├── main.py                      # Einstiegspunkt der Anwendung
 │   ├── core/
-│   │   ├── database.py         # SQLite-Datenbankmanagement
-│   │   ├── tracker.py          # Hauptlogik für Activity Tracking
+│   │   ├── database.py              # SQLite-Datenbankmanagement
+│   │   ├── database_protocol.py     # Type Protocols für Dependency Injection
+│   │   ├── tracker.py               # Hauptlogik für Activity Tracking
 │   │   └── platform/
-│   │       └── windows.py      # Windows-spezifisches Tracking
+│   │       └── windows.py           # Windows-spezifisches Tracking
 │   ├── gui/
-│   │   ├── main_window.py      # Hauptfenster
-│   │   ├── timeline.py         # Timeline-Visualisierung
-│   │   ├── projects.py         # Projektverwaltung
-│   │   ├── export_dialog.py    # Export-Dialog
-│   │   └── settings_dialog.py  # Einstellungen
+│   │   ├── main_window.py           # Hauptfenster
+│   │   ├── timeline.py              # Timeline-Visualisierung
+│   │   ├── projects.py              # Projektverwaltung
+│   │   ├── export_dialog.py         # Export-Dialog
+│   │   ├── settings_dialog.py       # Einstellungen
+│   │   └── assignment_suggestions.py # Zuweisungsvorschläge UI
 │   ├── utils/
-│   │   ├── config.py           # Konfigurationsverwaltung
-│   │   ├── export.py           # Export-Funktionen
-│   │   └── icon_cache.py       # Icon-Caching für Anwendungen
-│   └── models/                 # Datenmodelle
+│   │   ├── config.py                # Konfigurationsverwaltung
+│   │   ├── export.py                # Export-Funktionen
+│   │   ├── icon_cache.py            # Icon-Caching für Anwendungen
+│   │   ├── social_media_detector.py # Social Media Erkennung
+│   │   ├── smart_project_assigner.py # Intelligente Projektzuweisung
+│   │   └── daily_report_generator.py # Tagesbericht-Generator
+│   ├── models/
+│   │   ├── activity.py              # Activity Datenmodell
+│   │   └── project.py               # Project Datenmodell
+│   └── mcp_client/                  # MCP Client Integration
+│       └── client.py
+├── tests/                           # pytest Tests
+│   ├── conftest.py                  # Test-Fixtures
+│   └── test_*.py                    # Test-Module
 ├── resources/
-│   └── icons/                  # Anwendungs-Icons
-├── requirements.txt            # Python-Abhängigkeiten
-└── README.md                   # Diese Datei
+│   └── icons/                       # Anwendungs-Icons
+├── requirements.txt                 # Python-Abhängigkeiten
+└── README.md                        # Diese Datei
 ```
 
 ## Konfiguration
@@ -139,7 +154,7 @@ Die Datenbank enthält folgende Tabellen:
 
 ```bash
 # Repository forken und klonen
-git clone https://github.com/[your-username]/Timetracker.git
+git clone https://github.com/JanSigristBimatic/Timetracker.git
 cd Timetracker
 
 # Virtuelle Umgebung erstellen und aktivieren
@@ -174,9 +189,10 @@ Beiträge sind willkommen! Bitte folgen Sie diesen Schritten:
 
 - **GUI Framework**: PyQt6
 - **Datenbank**: SQLite3
-- **System-Integration**: psutil, pywin32
+- **System-Integration**: psutil, pywin32, pycaw (Audio)
 - **Datenverarbeitung**: pandas
 - **Export**: reportlab (PDF), openpyxl (Excel)
+- **Konfiguration**: python-dotenv
 
 ## Lizenz
 
@@ -188,7 +204,16 @@ Jan Sigrist
 
 ## Changelog
 
-### Version 0.2.0 (Aktuell)
+### Version 0.3.0 (Aktuell)
+- Intelligente Projektzuweisung mit KI-gestützten Vorschlägen
+- Social Media Erkennung für Produktivitätsanalysen
+- Automatische Tagesberichtgenerierung
+- Verbesserte Datenmodelle (Activity, Project)
+- MCP Client Integration Beta
+- Dependency Injection mit Type Protocols für bessere Testbarkeit
+- Erweiterte Test-Suite
+
+### Version 0.2.0
 - Wechsel von PostgreSQL zu SQLite für einfachere Installation
 - Verbesserte Projektmanagement-Funktionen
 - Export-Funktionalität für Excel, PDF und CSV
@@ -206,7 +231,7 @@ Jan Sigrist
 
 ## Support
 
-Bei Fragen oder Problemen erstellen Sie bitte ein [Issue](https://github.com/[username]/Timetracker/issues) im GitHub-Repository.
+Bei Fragen oder Problemen erstellen Sie bitte ein [Issue](https://github.com/JanSigristBimatic/Timetracker/issues) im GitHub-Repository.
 
 ## Roadmap
 

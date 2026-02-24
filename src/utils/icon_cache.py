@@ -77,6 +77,7 @@ class IconCache:
         large_icons: list = []
         small_icons: list = []
         hicon = None
+        screen_dc_handle = None
         hdc = None
         hdc_mem = None
         hbmp = None
@@ -94,8 +95,9 @@ class IconCache:
             if not hicon:
                 return None
 
-            # Create device context
-            hdc = win32ui.CreateDCFromHandle(win32gui.GetDC(0))
+            # Create device context (GetDC must be released with ReleaseDC, not DeleteDC)
+            screen_dc_handle = win32gui.GetDC(0)
+            hdc = win32ui.CreateDCFromHandle(screen_dc_handle)
             hbmp = win32ui.CreateBitmap()
             hbmp.CreateCompatibleBitmap(hdc, size, size)
             hdc_mem = hdc.CreateCompatibleDC()
@@ -142,7 +144,14 @@ class IconCache:
 
             if hdc:
                 try:
-                    hdc.DeleteDC()
+                    hdc.DetachDC()
+                except (OSError, AttributeError):
+                    pass
+
+            # Release screen DC properly (GetDC -> ReleaseDC, not DeleteDC)
+            if screen_dc_handle:
+                try:
+                    win32gui.ReleaseDC(0, screen_dc_handle)
                 except (OSError, AttributeError):
                     pass
 

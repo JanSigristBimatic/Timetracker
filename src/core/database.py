@@ -6,6 +6,14 @@ from threading import Lock
 from typing import Any, Optional
 
 
+# SQLite-compatible datetime format (space separator, not 'T', with microseconds)
+_SQLITE_DT_FMT = '%Y-%m-%d %H:%M:%S.%f'
+
+# Register adapters/converters for datetime (required since Python 3.12)
+sqlite3.register_adapter(datetime, lambda dt: dt.strftime(_SQLITE_DT_FMT))
+sqlite3.register_converter("TIMESTAMP", lambda b: datetime.fromisoformat(b.decode()))
+
+
 class Database:
     def __init__(self, db_path: Optional[str] = None):
         """Initialize SQLite database connection
@@ -35,7 +43,11 @@ class Database:
         # Store the path for reference
         self.db_path = str(final_db_path)
 
-        self.conn = sqlite3.connect(str(final_db_path), check_same_thread=False)
+        self.conn = sqlite3.connect(
+            str(final_db_path),
+            check_same_thread=False,
+            detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
+        )
         self.conn.row_factory = sqlite3.Row  # Return rows as dictionaries
 
         # Enable foreign key constraints (must be done for each connection)
@@ -149,7 +161,7 @@ class Database:
                     FROM activities
                     WHERE timestamp < ?
                       AND datetime(timestamp, '+' || duration || ' seconds') > ?
-                ''', (end_time, start_time))
+                ''', (end_time.strftime(_SQLITE_DT_FMT), start_time.strftime(_SQLITE_DT_FMT)))
 
                 overlapping = cursor.fetchall()
 
@@ -158,7 +170,6 @@ class Database:
                     for overlap in overlapping:
                         overlap_id = overlap[0]
                         overlap_start = datetime.fromisoformat(overlap[1]) if isinstance(overlap[1], str) else overlap[1]
-                        overlap_duration = overlap[2]
 
                         # Calculate new duration to end when this activity starts
                         new_duration = int((start_time - overlap_start).total_seconds())
@@ -177,7 +188,7 @@ class Database:
                 cursor.execute('''
                     INSERT INTO activities (timestamp, app_name, window_title, duration, is_idle, process_path)
                     VALUES (?, ?, ?, ?, ?, ?)
-                ''', (start_time, app_name, window_title, duration, is_idle, process_path))
+                ''', (start_time.strftime(_SQLITE_DT_FMT), app_name, window_title, duration, is_idle, process_path))
 
                 activity_id = cursor.lastrowid
                 self.conn.commit()
@@ -200,17 +211,17 @@ class Database:
         cursor = self.conn.cursor()
 
         query = 'SELECT * FROM activities WHERE 1=1'
-        params = []
+        params: list = []
 
         if start_date:
             query += ' AND timestamp >= ?'
-            params.append(start_date)
+            params.append(start_date.strftime(_SQLITE_DT_FMT))
 
         if end_date:
             query += ' AND timestamp <= ?'
-            params.append(end_date)
+            params.append(end_date.strftime(_SQLITE_DT_FMT))
 
-        if project_id:
+        if project_id is not None:
             query += ' AND project_id = ?'
             params.append(project_id)
 
@@ -244,6 +255,14 @@ class Database:
             cursor.close()
 
         return int(project_id) if project_id else 0
+
+    def delete_project(self, project_id: int) -> None:
+        """Delete a project by ID"""
+        with self._write_lock:
+            cursor = self.conn.cursor()
+            cursor.execute('DELETE FROM projects WHERE id = ?', (project_id,))
+            self.conn.commit()
+            cursor.close()
 
     def get_projects(self) -> list[dict[str, Any]]:
         """Get all projects"""
@@ -297,9 +316,9 @@ class Database:
                 UPDATE activities
                 SET project_id = ?
                 WHERE timestamp >= ?
-                  AND timestamp <= ?
+                  AND timestamp < ?
                   AND app_name = ?
-            ''', (project_id, start_time, end_time, app_name))
+            ''', (project_id, start_time.strftime(_SQLITE_DT_FMT), end_time.strftime(_SQLITE_DT_FMT), app_name))
 
             rows_affected = cursor.rowcount
 
@@ -309,7 +328,7 @@ class Database:
                     UPDATE projects
                     SET last_used = ?
                     WHERE id = ?
-                ''', (datetime.now(), project_id))
+                ''', (datetime.now().strftime(_SQLITE_DT_FMT), project_id))
 
             self.conn.commit()
             cursor.close()
@@ -355,20 +374,19 @@ class Database:
 
     def _initialize_social_media_project(self) -> None:
         """Initialize the Social Media project if it doesn't exist"""
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT id FROM projects WHERE name = ?', ('Social Media',))
-        result = cursor.fetchone()
+        with self._write_lock:
+            cursor = self.conn.cursor()
+            cursor.execute('SELECT id FROM projects WHERE name = ?', ('Social Media',))
+            result = cursor.fetchone()
 
-        if not result:
-            # Create Social Media project with a distinctive color
-            with self._write_lock:
+            if not result:
                 cursor.execute('''
                     INSERT INTO projects (name, color)
                     VALUES (?, ?)
                 ''', ('Social Media', '#e74c3c'))
                 self.conn.commit()
 
-        cursor.close()
+            cursor.close()
 
     def get_social_media_project_id(self) -> Optional[int]:
         """Get the ID of the Social Media project"""
@@ -388,9 +406,9 @@ class Database:
             cursor.execute('''
                 DELETE FROM activities
                 WHERE timestamp >= ?
-                  AND timestamp <= ?
+                  AND timestamp < ?
                   AND app_name = ?
-            ''', (start_time, end_time, app_name))
+            ''', (start_time.strftime(_SQLITE_DT_FMT), end_time.strftime(_SQLITE_DT_FMT), app_name))
 
             rows_affected = cursor.rowcount
             self.conn.commit()

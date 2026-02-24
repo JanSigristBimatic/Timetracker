@@ -106,6 +106,10 @@ class ActivityTracker:
                 ):
                     current = None
 
+                # Read idle/audio state outside the lock (these can be slow)
+                idle_time = self.platform_tracker.get_idle_time()
+                is_audio_playing = self.platform_tracker.is_audio_playing()
+
                 with self._activity_lock:
                     # Check if activity changed
                     if current and self._is_activity_different(current):
@@ -116,10 +120,6 @@ class ActivityTracker:
                         # Start tracking new activity
                         self._current_activity = current
                         self._start_time = datetime.now()
-
-                    # Check for idle time
-                    idle_time = self.platform_tracker.get_idle_time()
-                    is_audio_playing = self.platform_tracker.is_audio_playing()
 
                     # Consider idle only if: no input AND no audio playing
                     if idle_time > self.idle_threshold and not is_audio_playing:

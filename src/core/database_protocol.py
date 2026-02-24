@@ -70,6 +70,15 @@ class DatabaseProtocol(Protocol):
         """
         ...
 
+    def delete_project(self, project_id: int) -> None:
+        """
+        Delete a project by ID
+
+        Args:
+            project_id: ID of the project to delete
+        """
+        ...
+
     def get_projects(self) -> list[dict[str, Any]]:
         """
         Get all projects
@@ -86,6 +95,21 @@ class DatabaseProtocol(Protocol):
         Args:
             activity_id: ID of the activity
             project_id: ID of the project
+        """
+        ...
+
+    def assign_multiple_activities_to_project(
+        self, activity_ids: list[int], project_id: int
+    ) -> int:
+        """
+        Assign multiple activities to a project
+
+        Args:
+            activity_ids: List of activity IDs
+            project_id: ID of the project
+
+        Returns:
+            Number of activities affected
         """
         ...
 

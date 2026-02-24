@@ -22,6 +22,7 @@ class TestActivityTracker:
             "process_path": "C:\\Program Files\\VSCode\\Code.exe",
         }
         mock.get_idle_time.return_value = 0
+        mock.is_audio_playing.return_value = False
         return mock
 
     def test_tracker_initialization(self, mock_db):
@@ -120,7 +121,7 @@ class TestActivityTracker:
                 "process_path": "C:\\Code.exe",
             }
 
-            tracker.current_activity = activity1
+            tracker._current_activity = activity1
             assert not tracker._is_activity_different(activity1)
             assert tracker._is_activity_different(activity2)
             assert tracker._is_activity_different(activity3)
@@ -174,12 +175,12 @@ class TestActivityTracker:
             mock_get.return_value = mock_platform_tracker
 
             tracker = ActivityTracker(mock_db, poll_interval=0.01)
-            tracker.current_activity = {
+            tracker._current_activity = {
                 "app_name": "Code.exe",
                 "window_title": "main.py",
                 "process_path": "C:\\Code.exe",
             }
-            tracker.start_time = datetime.now()
+            tracker._start_time = datetime.now()
 
             # Immediately save (less than 1 second)
             time.sleep(0.05)
