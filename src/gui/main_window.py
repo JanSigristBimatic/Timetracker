@@ -28,6 +28,7 @@ from .export_dialog import ExportDialog
 from .projects import ProjectManagerDialog
 from .settings_dialog import SettingsDialog
 from .timeline import TimelineWidget
+from .theme import get_theme
 
 
 class ProjectDropWidget(QWidget):
@@ -38,6 +39,7 @@ class ProjectDropWidget(QWidget):
         self.project_id = project_id
         self.project_name = project_name
         self.main_window = main_window
+        self.theme = get_theme()
         self.setAcceptDrops(True)
         self.original_stylesheet = ""
 
@@ -48,9 +50,10 @@ class ProjectDropWidget(QWidget):
             # Save original stylesheet
             self.original_stylesheet = self.styleSheet()
             # Add visual feedback with border and lighter background
+            accent = self.theme.colors.accent
             self.setStyleSheet(
                 self.original_stylesheet +
-                "border: 2px dashed #3498db; background-color: rgba(52, 152, 219, 0.1);"
+                f"border: 2px dashed {accent}; background-color: rgba(52, 152, 219, 0.15);"
             )
 
     def dragLeaveEvent(self, event):
@@ -100,6 +103,7 @@ class MainWindow(QMainWindow):
         self.database = database
         self.tracker = tracker
         self.current_date = datetime.now().date()
+        self.theme = get_theme()
 
         # Icon cache
         self.icon_cache = IconCache()
@@ -224,9 +228,7 @@ class MainWindow(QMainWindow):
         # AI Assignment button
         ai_assign_btn = QPushButton("🤖 KI-Zuordnung")
         ai_assign_btn.clicked.connect(self.open_ai_assignment)
-        ai_assign_btn.setStyleSheet(
-            "background-color: #3498db; color: white; font-weight: bold;"
-        )
+        ai_assign_btn.setProperty("class", "primary")
         layout.addWidget(ai_assign_btn)
 
         # Export button
@@ -250,7 +252,7 @@ class MainWindow(QMainWindow):
         """Create bar with recently used projects for quick assignment"""
         frame = QFrame()
         frame.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
-        frame.setStyleSheet("background-color: #f8f9fa; padding: 5px;")
+        frame.setProperty("class", "card")
 
         layout = QHBoxLayout(frame)
         layout.setContentsMargins(10, 5, 10, 5)
@@ -269,7 +271,7 @@ class MainWindow(QMainWindow):
         desc_font.setPointSize(9)
         desc_font.setItalic(True)
         desc_label.setFont(desc_font)
-        desc_label.setStyleSheet("color: #7f8c8d;")
+        desc_label.setProperty("class", "muted")
         layout.addWidget(desc_label)
 
         # Container for project widgets
@@ -408,7 +410,7 @@ class MainWindow(QMainWindow):
         if not activities:
             no_data = QLabel("Keine Daten für diesen Tag")
             no_data.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            no_data.setStyleSheet("color: #7f8c8d; padding: 20px;")
+            no_data.setProperty("class", "muted")
             self.stats_layout.addWidget(no_data)
             return
 
@@ -439,7 +441,7 @@ class MainWindow(QMainWindow):
         project_desc_font.setPointSize(9)
         project_desc_font.setItalic(True)
         project_desc.setFont(project_desc_font)
-        project_desc.setStyleSheet("color: #7f8c8d; margin-bottom: 5px;")
+        project_desc.setProperty("class", "muted")
         self.stats_layout.addWidget(project_desc)
 
         # Group by project (use all activities, not filtered)
@@ -537,7 +539,7 @@ class MainWindow(QMainWindow):
             name_font.setPointSize(11)
             name_font.setItalic(True)
             name_label.setFont(name_font)
-            name_label.setStyleSheet("color: #7f8c8d;")
+            name_label.setProperty("class", "muted")
             unassigned_layout.addWidget(name_label, stretch=1)
 
             time_label = QLabel(f"{hours:.1f}h ({percentage:.0f}%)")
@@ -629,9 +631,7 @@ class MainWindow(QMainWindow):
         # Show "and X more" if there are more apps
         if len(sorted_apps) > 10:
             more_label = QLabel(f"... und {len(sorted_apps) - 10} weitere Apps")
-            more_label.setStyleSheet(
-                "color: #7f8c8d; font-style: italic; padding: 5px;"
-            )
+            more_label.setProperty("class", "muted")
             more_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.stats_layout.addWidget(more_label)
 
@@ -728,18 +728,14 @@ class MainWindow(QMainWindow):
         remaining_files = len([f for f in sorted_files if f[1] > 60]) - displayed_files
         if remaining_files > 0:
             more_label = QLabel(f"... und {remaining_files} weitere Dateien")
-            more_label.setStyleSheet(
-                "color: #7f8c8d; font-style: italic; padding: 5px;"
-            )
+            more_label.setProperty("class", "muted")
             more_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.stats_layout.addWidget(more_label)
 
         # Show message if no files detected
         if displayed_files == 0:
             no_files_label = QLabel("Keine Dateien erkannt")
-            no_files_label.setStyleSheet(
-                "color: #7f8c8d; font-style: italic; padding: 5px;"
-            )
+            no_files_label.setProperty("class", "muted")
             no_files_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.stats_layout.addWidget(no_files_label)
 

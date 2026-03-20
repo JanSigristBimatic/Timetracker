@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 
 from core.database_protocol import DatabaseProtocol
 from utils.smart_project_assigner import SmartProjectAssigner
+from .theme import get_theme
 
 
 class AssignmentSuggestionsDialog(QDialog):
@@ -34,6 +35,7 @@ class AssignmentSuggestionsDialog(QDialog):
         self.projects = []  # Alle verfügbaren Projekte
         self.widget_map = {}  # Map: index -> widget für Style-Updates
         self.last_clicked_index = None  # Für Shift-Klick Bereichsauswahl
+        self.theme = get_theme()
 
         self.setup_ui()
         self.load_suggestions()
@@ -62,7 +64,7 @@ class AssignmentSuggestionsDialog(QDialog):
             "um einen Bereich auszuwählen."
         )
         info.setWordWrap(True)
-        info.setStyleSheet("color: #7f8c8d; margin: 10px 0;")
+        info.setProperty("class", "muted")
         layout.addWidget(info)
 
         # Scroll Area für Vorschläge
@@ -96,9 +98,7 @@ class AssignmentSuggestionsDialog(QDialog):
 
         self.apply_btn = QPushButton("Ausgewählte übernehmen")
         self.apply_btn.clicked.connect(self.apply_selected)
-        self.apply_btn.setStyleSheet(
-            "background-color: #27ae60; color: white; font-weight: bold; padding: 5px 15px;"
-        )
+        self.apply_btn.setProperty("class", "success")
         button_layout.addWidget(self.apply_btn)
 
         layout.addLayout(button_layout)
@@ -120,9 +120,7 @@ class AssignmentSuggestionsDialog(QDialog):
         if not self.suggestions:
             no_suggestions = QLabel("Keine Vorschläge verfügbar")
             no_suggestions.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            no_suggestions.setStyleSheet(
-                "color: #7f8c8d; padding: 20px; font-size: 14px;"
-            )
+            no_suggestions.setProperty("class", "muted")
             self.suggestions_layout.addWidget(no_suggestions)
             self.apply_btn.setEnabled(False)
             return
@@ -144,12 +142,13 @@ class AssignmentSuggestionsDialog(QDialog):
 
     def create_suggestion_widget(self, index: int, suggestion: dict) -> QWidget:
         """Erstellt Widget für einen einzelnen Vorschlag"""
+        c = self.theme.colors
         widget = QWidget()
         widget.setObjectName(f"suggestion_card_{index}")  # Unique identifier
         widget.setStyleSheet(
-            f"QWidget#suggestion_card_{index} {{ background-color: #f8f9fa; border: 1px solid #dee2e6; "
-            f"border-radius: 5px; padding: 10px; margin: 2px; }} "
-            f"QWidget#suggestion_card_{index}:hover {{ background-color: #e9ecef; border-color: #adb5bd; }}"
+            f"QWidget#suggestion_card_{index} {{ background-color: {c.card_background}; border: 1px solid {c.border}; "
+            f"border-radius: 8px; padding: 10px; margin: 2px; }} "
+            f"QWidget#suggestion_card_{index}:hover {{ background-color: {c.background_tertiary}; border-color: {c.accent}; }}"
         )
         widget.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -185,7 +184,7 @@ class AssignmentSuggestionsDialog(QDialog):
         if isinstance(timestamp, str):
             timestamp = datetime.fromisoformat(timestamp)
         time_label = QLabel(timestamp.strftime("%d.%m.%Y %H:%M"))
-        time_label.setStyleSheet("color: #7f8c8d; font-size: 11px;")
+        time_label.setProperty("class", "muted")
         top_row.addWidget(time_label)
 
         layout.addLayout(top_row)
@@ -194,13 +193,14 @@ class AssignmentSuggestionsDialog(QDialog):
         activity_info = QHBoxLayout()
 
         app_label = QLabel(f"📱 {activity['app_name']}")
-        app_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        app_font = QFont()
+        app_font.setBold(True)
+        app_label.setFont(app_font)
         activity_info.addWidget(app_label)
 
         window_title = activity.get("window_title", "")
         if window_title:
             window_label = QLabel(f" - {window_title[:60]}")
-            window_label.setStyleSheet("color: #495057;")
             activity_info.addWidget(window_label)
 
         activity_info.addStretch()
@@ -208,7 +208,7 @@ class AssignmentSuggestionsDialog(QDialog):
         # Duration
         duration_minutes = activity["duration"] / 60
         duration_label = QLabel(f"{duration_minutes:.0f} min")
-        duration_label.setStyleSheet("color: #7f8c8d;")
+        duration_label.setProperty("class", "muted")
         activity_info.addWidget(duration_label)
 
         layout.addLayout(activity_info)
@@ -216,19 +216,11 @@ class AssignmentSuggestionsDialog(QDialog):
         # Project Suggestion mit ComboBox
         project_row = QHBoxLayout()
         project_label = QLabel("→ Projekt:")
-        project_label.setStyleSheet("color: #2c3e50;")
         project_row.addWidget(project_label)
 
-        # Projekt-ComboBox
+        # Projekt-ComboBox (uses global theme styles)
         project_combo = QComboBox()
-        project_combo.setStyleSheet(
-            "QComboBox { padding: 5px; background-color: white; color: #2c3e50; border: 1px solid #ced4da; "
-            "border-radius: 3px; min-width: 200px; }"
-            "QComboBox:hover { border-color: #80bdff; }"
-            "QComboBox::drop-down { border: none; width: 20px; }"
-            "QComboBox QAbstractItemView { background-color: white; color: #2c3e50; "
-            "selection-background-color: #3498db; selection-color: white; }"
-        )
+        project_combo.setMinimumWidth(200)
 
         # Fülle ComboBox mit allen Projekten
         for project in self.projects:
@@ -328,21 +320,22 @@ class AssignmentSuggestionsDialog(QDialog):
         if not widget:
             return
 
+        c = self.theme.colors
         object_name = f"suggestion_card_{index}"
 
         if index in self.selected_suggestions:
             # Ausgewählt: Grüne Umrandung (nur auf Haupt-Widget)
             widget.setStyleSheet(
-                f"QWidget#{ object_name} {{ background-color: #f8f9fa; border: 3px solid #27ae60; "
-                f"border-radius: 5px; padding: 10px; margin: 2px; }} "
-                f"QWidget#{object_name}:hover {{ background-color: #e9ecef; border-color: #1e8449; }}"
+                f"QWidget#{object_name} {{ background-color: {c.card_background}; border: 3px solid {c.success}; "
+                f"border-radius: 8px; padding: 10px; margin: 2px; }} "
+                f"QWidget#{object_name}:hover {{ background-color: {c.background_tertiary}; border-color: {c.success_hover}; }}"
             )
         else:
             # Nicht ausgewählt: Standard-Style
             widget.setStyleSheet(
-                f"QWidget#{object_name} {{ background-color: #f8f9fa; border: 1px solid #dee2e6; "
-                f"border-radius: 5px; padding: 10px; margin: 2px; }} "
-                f"QWidget#{object_name}:hover {{ background-color: #e9ecef; border-color: #adb5bd; }}"
+                f"QWidget#{object_name} {{ background-color: {c.card_background}; border: 1px solid {c.border}; "
+                f"border-radius: 8px; padding: 10px; margin: 2px; }} "
+                f"QWidget#{object_name}:hover {{ background-color: {c.background_tertiary}; border-color: {c.accent}; }}"
             )
 
     def select_all(self):

@@ -1,7 +1,9 @@
 import os
 from pathlib import Path
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QButtonGroup,
     QDialog,
     QFileDialog,
     QFormLayout,
@@ -11,12 +13,14 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QRadioButton,
     QSpinBox,
     QTextEdit,
     QVBoxLayout,
 )
 
 from utils.config import DEFAULT_IGNORED_PROCESSES, DEFAULT_IGNORED_WINDOW_TITLES
+from .theme import ThemeMode, get_theme
 
 
 class SettingsDialog(QDialog):
@@ -24,15 +28,52 @@ class SettingsDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.theme_manager = get_theme()
         self.setup_ui()
         self.load_settings()
 
     def setup_ui(self):
         """Setup the user interface"""
         self.setWindowTitle("Einstellungen")
-        self.setGeometry(200, 200, 500, 400)
+        self.setGeometry(200, 200, 550, 550)
 
         layout = QVBoxLayout(self)
+
+        # Appearance Settings (Theme)
+        appearance_group = QGroupBox("Erscheinungsbild")
+        appearance_layout = QVBoxLayout()
+
+        theme_label = QLabel("Design-Modus:")
+        appearance_layout.addWidget(theme_label)
+
+        theme_row = QHBoxLayout()
+
+        self.theme_group = QButtonGroup(self)
+
+        self.light_radio = QRadioButton("☀️ Hell")
+        self.light_radio.setToolTip("Helles Design für Tageslicht")
+        self.theme_group.addButton(self.light_radio, 0)
+        theme_row.addWidget(self.light_radio)
+
+        self.dark_radio = QRadioButton("🌙 Dunkel")
+        self.dark_radio.setToolTip("Dunkles Design für Nachtarbeit")
+        self.theme_group.addButton(self.dark_radio, 1)
+        theme_row.addWidget(self.dark_radio)
+
+        theme_row.addStretch()
+
+        # Setze aktuelles Theme
+        if self.theme_manager.is_dark:
+            self.dark_radio.setChecked(True)
+        else:
+            self.light_radio.setChecked(True)
+
+        # Theme direkt anwenden bei Änderung
+        self.theme_group.buttonClicked.connect(self.on_theme_changed)
+
+        appearance_layout.addLayout(theme_row)
+        appearance_group.setLayout(appearance_layout)
+        layout.addWidget(appearance_group)
 
         # Database Settings
         db_group = QGroupBox("Datenbank")
@@ -155,6 +196,13 @@ class SettingsDialog(QDialog):
         button_layout.addWidget(reset_btn)
 
         layout.addLayout(button_layout)
+
+    def on_theme_changed(self, button):
+        """Handle theme change"""
+        if button == self.light_radio:
+            self.theme_manager.set_theme(ThemeMode.LIGHT)
+        else:
+            self.theme_manager.set_theme(ThemeMode.DARK)
 
     def browse_database_path(self):
         """Open file dialog to select database path"""

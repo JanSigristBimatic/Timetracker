@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 from core.database import Database
 from core.tracker import ActivityTracker
 from gui.main_window import MainWindow
+from gui.theme import get_theme
 
 # Load environment variables from .env file
 env_path = Path(__file__).parent.parent / '.env'
@@ -40,6 +41,10 @@ class TimeTrackerApp:
         self.app = QApplication(sys.argv)
         self.app.setApplicationName("TimeTracker")
         self.app.setQuitOnLastWindowClosed(False)
+
+        # Initialize and apply theme
+        self.theme_manager = get_theme()
+        self.theme_manager.apply_theme()
 
         # Initialize database
         try:

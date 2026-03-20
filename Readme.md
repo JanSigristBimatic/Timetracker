@@ -32,41 +32,60 @@ TimeTracker ist eine intelligente Zeiterfassungsanwendung, die automatisch verfo
 
 ## Installation
 
-### 1. Repository klonen
+### Schnellinstallation (empfohlen)
 
-```bash
-git clone https://github.com/JanSigristBimatic/Timetracker.git
-cd Timetracker
-```
+1. **Repository klonen oder herunterladen**
+   ```bash
+   git clone https://github.com/JanSigristBimatic/Timetracker.git
+   cd Timetracker
+   ```
 
-### 2. Virtuelle Umgebung erstellen (empfohlen)
+2. **Installer ausführen**
 
-```bash
-python -m venv venv
-```
+   Doppelklick auf `install.bat` oder im Terminal:
+   ```bash
+   install.bat
+   ```
 
-### 3. Virtuelle Umgebung aktivieren
+   Der Installer:
+   - Prüft ob Python installiert ist
+   - Installiert automatisch alle Abhängigkeiten
+   - Fragt am Ende, ob TimeTracker gestartet werden soll
 
-**Windows:**
-```bash
-venv\Scripts\activate
-```
+### Manuelle Installation
 
-**macOS/Linux:**
-```bash
-source venv/bin/activate
-```
+<details>
+<summary>Klicken für manuelle Installationsschritte</summary>
 
-### 4. Abhängigkeiten installieren
+1. **Repository klonen**
+   ```bash
+   git clone https://github.com/JanSigristBimatic/Timetracker.git
+   cd Timetracker
+   ```
 
-```bash
-pip install -r requirements.txt
-```
+2. **Virtuelle Umgebung erstellen (optional)**
+   ```bash
+   python -m venv venv
+   venv\Scripts\activate
+   ```
+
+3. **Abhängigkeiten installieren**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Anwendung starten**
+   ```bash
+   python src/main.py
+   ```
+
+</details>
 
 ## Verwendung
 
 ### Anwendung starten
 
+Doppelklick auf `install.bat` und "j" eingeben, oder:
 ```bash
 python src/main.py
 ```
@@ -157,14 +176,16 @@ Die Datenbank enthält folgende Tabellen:
 git clone https://github.com/JanSigristBimatic/Timetracker.git
 cd Timetracker
 
-# Virtuelle Umgebung erstellen und aktivieren
+# Installer ausführen (installiert alle Abhängigkeiten)
+install.bat
+
+# ODER manuell mit virtueller Umgebung:
 python -m venv venv
-source venv/bin/activate  # oder venv\Scripts\activate unter Windows
-
-# Abhängigkeiten installieren
+venv\Scripts\activate
 pip install -r requirements.txt
+pip install -r requirements-dev.txt  # Entwickler-Abhängigkeiten
 
-# Anwendung im Entwicklungsmodus starten
+# Anwendung starten
 python src/main.py
 ```
 

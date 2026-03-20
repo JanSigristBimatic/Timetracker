@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import QMenu, QWidget, QMessageBox
 from core.database_protocol import DatabaseProtocol
 from utils.config import should_ignore_activity
 from utils.icon_cache import IconCache
+from .theme import get_theme
 
 
 class TimelineWidget(QWidget):
@@ -21,6 +22,7 @@ class TimelineWidget(QWidget):
         self.database = database
         self.activities = []
         self.current_date = datetime.now().date()
+        self.theme = get_theme()
 
         # Icon cache
         self.icon_cache = IconCache()
@@ -36,14 +38,8 @@ class TimelineWidget(QWidget):
         self.right_margin = 20
         self.top_margin = 20
 
-        # Colors
-        self.colors = {
-            'active': QColor(52, 152, 219),  # Blue
-            'idle': QColor(149, 165, 166),   # Gray
-            'background': QColor(255, 255, 255),
-            'grid': QColor(236, 240, 241),
-            'text': QColor(44, 62, 80)
-        }
+        # Colors - now from theme
+        self._update_colors()
 
         # Color palette for different apps
         self.app_colors = {}
@@ -95,6 +91,10 @@ class TimelineWidget(QWidget):
 
         # Drag and drop support
         self.drag_start_position = None
+
+    def _update_colors(self):
+        """Update colors from theme"""
+        self.colors = self.theme.get_timeline_colors()
 
     def set_activities(self, activities, date):
         """Set activities to display"""
@@ -191,6 +191,9 @@ class TimelineWidget(QWidget):
 
     def paintEvent(self, event):
         """Paint the timeline"""
+        # Update colors from theme (in case theme changed)
+        self._update_colors()
+
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -302,9 +305,9 @@ class TimelineWidget(QWidget):
 
             # Draw border (thicker if selected)
             if activity in self.selected_activities:
-                painter.setPen(QPen(QColor(255, 215, 0), 3))  # Gold border for selected
+                painter.setPen(QPen(self.colors['selected_border'], 3))  # Gold border for selected
             else:
-                painter.setPen(QPen(QColor(255, 255, 255), 1))
+                painter.setPen(QPen(QColor(255, 255, 255, 80), 1))
             painter.drawRect(rect)
 
             # Store rect for click detection
