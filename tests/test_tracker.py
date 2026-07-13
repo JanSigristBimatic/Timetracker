@@ -234,3 +234,93 @@ class TestActivityTracker:
 
             # Should not raise any errors
             assert not tracker.is_running
+
+
+class TestIdleHandling:
+    """Test that idle time is separated correctly from active work"""
+
+    @pytest.fixture
+    def mock_platform_tracker(self):
+        mock = Mock()
+        mock.get_active_window.return_value = {
+            "app_name": "Code.exe",
+            "window_title": "main.py - VSCode",
+            "process_path": "C:\\Code.exe",
+        }
+        mock.get_idle_time.return_value = 0
+        mock.is_audio_playing.return_value = False
+        return mock
+
+    def _make_tracker(self, mock_db, mock_platform_tracker, idle_threshold=60):
+        with patch("core.tracker.ActivityTracker._get_platform_tracker") as mock_get:
+            mock_get.return_value = mock_platform_tracker
+            return ActivityTracker(
+                mock_db, poll_interval=0.05, idle_threshold=idle_threshold
+            )
+
+    def test_active_time_ends_when_input_stopped(self, mock_db, mock_platform_tracker):
+        """Going idle must cut the activity at the last input, not at now"""
+        from datetime import timedelta
+
+        tracker = self._make_tracker(mock_db, mock_platform_tracker)
+
+        # Simulate 10 minutes of work, then 2 minutes without input
+        work_start = datetime.now() - timedelta(minutes=12)
+        tracker._current_activity = {
+            "app_name": "Code.exe",
+            "window_title": "main.py",
+            "process_path": "C:\\Code.exe",
+        }
+        tracker._start_time = work_start
+
+        with tracker._activity_lock:
+            tracker._enter_idle_state(idle_time=120)
+
+        activities = mock_db.get_activities()
+        assert len(activities) == 1
+
+        saved = activities[0]
+        assert not saved["is_idle"]
+        # ~10 minutes of work saved, NOT 12 (idle time excluded)
+        assert abs(saved["duration"] - 600) <= 2
+        assert tracker._current_activity is None
+        assert tracker._idle_since is not None
+
+    def test_idle_period_saved_on_resume(self, mock_db, mock_platform_tracker):
+        """Returning from idle stores the idle gap as its own block"""
+        from datetime import timedelta
+
+        tracker = self._make_tracker(mock_db, mock_platform_tracker)
+        tracker._idle_since = datetime.now() - timedelta(minutes=5)
+
+        with tracker._activity_lock:
+            tracker._exit_idle_state()
+
+        activities = mock_db.get_activities()
+        assert len(activities) == 1
+        assert activities[0]["is_idle"]
+        assert activities[0]["app_name"] == "Idle"
+        assert abs(activities[0]["duration"] - 300) <= 2
+        assert tracker._idle_since is None
+
+    def test_rule_assigns_new_activity(self, mock_db, mock_platform_tracker):
+        """Assignment rules are applied when an activity is saved"""
+        from datetime import timedelta
+
+        project_id = mock_db.create_project("Development")
+        mock_db.create_project_rule(project_id, "app", "code.exe")
+
+        tracker = self._make_tracker(mock_db, mock_platform_tracker)
+        tracker._current_activity = {
+            "app_name": "Code.exe",
+            "window_title": "main.py",
+            "process_path": "C:\\Code.exe",
+        }
+        tracker._start_time = datetime.now() - timedelta(minutes=5)
+
+        with tracker._activity_lock:
+            tracker._save_current_activity()
+
+        activities = mock_db.get_activities()
+        assert len(activities) == 1
+        assert activities[0]["project_id"] == project_id

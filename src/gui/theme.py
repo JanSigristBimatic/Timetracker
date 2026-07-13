@@ -3,14 +3,26 @@ Design System und Theme Management für TimeTracker
 Unterstützt Light und Dark Mode mit modernen UI-Verbesserungen
 """
 
-import os
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict
 
-from PyQt6.QtCore import QSettings
-from PyQt6.QtGui import QColor, QPalette
+from PyQt6.QtCore import QSettings, Qt
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QApplication
+
+
+def contrasting_text_color(background: QColor) -> QColor:
+    """Return black or white depending on the background luminance.
+
+    Ensures readable text on arbitrary project/app colors.
+    """
+    luminance = (
+        0.299 * background.red()
+        + 0.587 * background.green()
+        + 0.114 * background.blue()
+    )
+    return QColor(30, 30, 30) if luminance > 150 else QColor(255, 255, 255)
 
 
 class ThemeMode(Enum):
@@ -179,6 +191,7 @@ class ThemeManager:
     _current_theme: ThemeMode = ThemeMode.LIGHT
     _colors: ThemeColors = LIGHT_THEME
     _settings: QSettings = None
+    _system_watch_connected: bool = False
 
     def __new__(cls):
         if cls._instance is None:
@@ -191,12 +204,31 @@ class ThemeManager:
         self._settings = QSettings("TimeTracker", "TimeTracker")
         saved_theme = self._settings.value("theme", "light")
 
-        if saved_theme == "dark":
-            self._current_theme = ThemeMode.DARK
-            self._colors = DARK_THEME
-        else:
+        try:
+            self._current_theme = ThemeMode(saved_theme)
+        except ValueError:
             self._current_theme = ThemeMode.LIGHT
-            self._colors = LIGHT_THEME
+
+        self._colors = self._resolve_colors()
+
+    def _resolve_colors(self) -> ThemeColors:
+        """Löse den effektiven Farbsatz auf (SYSTEM folgt dem OS)"""
+        if self._current_theme == ThemeMode.DARK:
+            return DARK_THEME
+        if self._current_theme == ThemeMode.SYSTEM and self._system_prefers_dark():
+            return DARK_THEME
+        return LIGHT_THEME
+
+    @staticmethod
+    def _system_prefers_dark() -> bool:
+        """Prüfe die System-Farbschema-Einstellung (Qt 6.5+)"""
+        app = QApplication.instance()
+        if not app:
+            return False
+        try:
+            return app.styleHints().colorScheme() == Qt.ColorScheme.Dark
+        except AttributeError:
+            return False
 
     @property
     def current_theme(self) -> ThemeMode:
@@ -208,16 +240,11 @@ class ThemeManager:
 
     @property
     def is_dark(self) -> bool:
-        return self._current_theme == ThemeMode.DARK
+        return self._colors is DARK_THEME
 
     def set_theme(self, theme: ThemeMode):
         """Setze das aktuelle Theme"""
         self._current_theme = theme
-
-        if theme == ThemeMode.DARK:
-            self._colors = DARK_THEME
-        else:
-            self._colors = LIGHT_THEME
 
         # Speichere Einstellung
         self._settings.setValue("theme", theme.value)
@@ -227,16 +254,34 @@ class ThemeManager:
 
     def toggle_theme(self):
         """Wechsle zwischen Light und Dark Mode"""
-        if self._current_theme == ThemeMode.LIGHT:
-            self.set_theme(ThemeMode.DARK)
-        else:
+        if self.is_dark:
             self.set_theme(ThemeMode.LIGHT)
+        else:
+            self.set_theme(ThemeMode.DARK)
 
     def apply_theme(self):
         """Wende das aktuelle Theme auf die Anwendung an"""
+        self._colors = self._resolve_colors()
+
         app = QApplication.instance()
         if app:
             app.setStyleSheet(self.get_stylesheet())
+            self._watch_system_scheme(app)
+
+    def _watch_system_scheme(self, app):
+        """Folge Änderungen des System-Farbschemas live (einmalig verbinden)"""
+        if self._system_watch_connected:
+            return
+        try:
+            app.styleHints().colorSchemeChanged.connect(self._on_system_scheme_changed)
+            self._system_watch_connected = True
+        except AttributeError:
+            pass  # Qt < 6.5 has no colorSchemeChanged
+
+    def _on_system_scheme_changed(self, *_args):
+        """Reagiere auf System-Theme-Wechsel im SYSTEM-Modus"""
+        if self._current_theme == ThemeMode.SYSTEM:
+            self.apply_theme()
 
     def get_stylesheet(self) -> str:
         """Generiere das komplette Stylesheet für das aktuelle Theme"""

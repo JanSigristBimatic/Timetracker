@@ -21,6 +21,7 @@ class DatabaseProtocol(Protocol):
         end_time: datetime,
         is_idle: bool = False,
         process_path: Optional[str] = None,
+        prevent_overlap: bool = True,
     ) -> int:
         """
         Save a tracked activity to the database
@@ -32,6 +33,7 @@ class DatabaseProtocol(Protocol):
             end_time: End time of the activity
             is_idle: Whether the activity represents idle time
             process_path: Optional path to the process executable
+            prevent_overlap: Whether overlapping activities are shortened
 
         Returns:
             The ID of the saved activity
@@ -88,13 +90,16 @@ class DatabaseProtocol(Protocol):
         """
         ...
 
-    def assign_activity_to_project(self, activity_id: int, project_id: int) -> None:
+    def assign_activity_to_project(
+        self, activity_id: int, project_id: Optional[int], update_last_used: bool = True
+    ) -> None:
         """
-        Assign an activity to a project
+        Assign an activity to a project (None clears the assignment)
 
         Args:
             activity_id: ID of the activity
-            project_id: ID of the project
+            project_id: ID of the project or None
+            update_last_used: Whether to touch the project's last_used
         """
         ...
 
@@ -194,6 +199,106 @@ class DatabaseProtocol(Protocol):
 
         Returns:
             Number of activities deleted
+        """
+        ...
+
+    def get_activities_in_timerange(
+        self, start_time: datetime, end_time: datetime, app_name: str
+    ) -> list[dict[str, Any]]:
+        """
+        Get activities matched by the timerange operations
+        (start inclusive, end exclusive)
+
+        Args:
+            start_time: Start of the time range (inclusive)
+            end_time: End of the time range (exclusive)
+            app_name: Name of the application
+
+        Returns:
+            List of activity dictionaries
+        """
+        ...
+
+    def restore_activities(self, activities: list[dict[str, Any]]) -> int:
+        """
+        Re-insert previously deleted activities (undo support)
+
+        Args:
+            activities: Full activity dictionaries including IDs
+
+        Returns:
+            Number of activities restored
+        """
+        ...
+
+    def get_total_duration(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        include_idle: bool = False,
+    ) -> int:
+        """
+        Get the summed activity duration in seconds for a time range
+
+        Args:
+            start_date: Start of the range
+            end_date: End of the range
+            include_idle: Whether idle time counts
+
+        Returns:
+            Total duration in seconds
+        """
+        ...
+
+    def create_project_rule(
+        self,
+        project_id: int,
+        field: str,
+        pattern: str,
+        match_type: str = 'contains',
+    ) -> int:
+        """
+        Create an assignment rule
+
+        Args:
+            project_id: Target project
+            field: 'app' or 'title'
+            pattern: Substring or regex to match
+            match_type: 'contains' or 'regex'
+
+        Returns:
+            The ID of the created rule
+        """
+        ...
+
+    def get_project_rules(self, enabled_only: bool = False) -> list[dict[str, Any]]:
+        """
+        Get all assignment rules ordered by priority
+
+        Args:
+            enabled_only: Only return enabled rules
+
+        Returns:
+            List of rule dictionaries
+        """
+        ...
+
+    def delete_project_rule(self, rule_id: int) -> None:
+        """
+        Delete an assignment rule by ID
+
+        Args:
+            rule_id: ID of the rule
+        """
+        ...
+
+    def set_project_rule_enabled(self, rule_id: int, enabled: bool) -> None:
+        """
+        Enable or disable an assignment rule
+
+        Args:
+            rule_id: ID of the rule
+            enabled: New enabled state
         """
         ...
 

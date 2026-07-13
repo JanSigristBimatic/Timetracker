@@ -21,8 +21,10 @@ class MockDatabase(DatabaseProtocol):
         self.activities = []
         self.projects = []
         self.settings = {}
+        self.project_rules = []
         self._activity_id_counter = 1
         self._project_id_counter = 1
+        self._rule_id_counter = 1
 
     def save_activity(
         self,
@@ -32,6 +34,7 @@ class MockDatabase(DatabaseProtocol):
         end_time: datetime,
         is_idle: bool = False,
         process_path: str | None = None,
+        prevent_overlap: bool = True,
     ) -> int:
         """Save activity and return ID"""
         activity_id = self._activity_id_counter
@@ -97,12 +100,20 @@ class MockDatabase(DatabaseProtocol):
         """Get all projects"""
         return sorted(self.projects, key=lambda x: x["name"])
 
-    def assign_activity_to_project(self, activity_id: int, project_id: int) -> None:
+    def assign_activity_to_project(
+        self, activity_id: int, project_id: int | None, update_last_used: bool = True
+    ) -> None:
         """Assign activity to project"""
         for activity in self.activities:
             if activity["id"] == activity_id:
                 activity["project_id"] = project_id
                 break
+
+        if update_last_used and project_id is not None:
+            for project in self.projects:
+                if project["id"] == project_id:
+                    project["last_used"] = datetime.now()
+                    break
 
     def assign_multiple_activities_to_project(
         self, activity_ids: list[int], project_id: int
@@ -163,6 +174,86 @@ class MockDatabase(DatabaseProtocol):
         for activity in to_delete:
             self.activities.remove(activity)
         return len(to_delete)
+
+    def get_activities_in_timerange(
+        self, start_time: datetime, end_time: datetime, app_name: str
+    ) -> list[dict[str, Any]]:
+        """Get activities in a time range (start inclusive, end exclusive)"""
+        return [
+            a.copy() for a in self.activities
+            if a["timestamp"] >= start_time
+            and a["timestamp"] < end_time
+            and a["app_name"] == app_name
+        ]
+
+    def restore_activities(self, activities: list[dict[str, Any]]) -> int:
+        """Re-insert previously deleted activities"""
+        restored = 0
+        existing_ids = {a["id"] for a in self.activities}
+
+        for activity in activities:
+            if activity["id"] not in existing_ids:
+                self.activities.append(activity.copy())
+                restored += 1
+
+        return restored
+
+    def get_total_duration(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        include_idle: bool = False,
+    ) -> int:
+        """Get summed duration in seconds for a time range"""
+        return sum(
+            a["duration"] for a in self.activities
+            if start_date <= a["timestamp"] <= end_date
+            and (include_idle or not a.get("is_idle", False))
+        )
+
+    def create_project_rule(
+        self,
+        project_id: int,
+        field: str,
+        pattern: str,
+        match_type: str = "contains",
+    ) -> int:
+        """Create an assignment rule"""
+        rule_id = self._rule_id_counter
+        self._rule_id_counter += 1
+
+        self.project_rules.append({
+            "id": rule_id,
+            "project_id": project_id,
+            "field": field,
+            "match_type": match_type,
+            "pattern": pattern,
+            "enabled": True,
+            "priority": 0,
+        })
+
+        return rule_id
+
+    def get_project_rules(self, enabled_only: bool = False) -> list[dict[str, Any]]:
+        """Get all assignment rules ordered by priority"""
+        rules = self.project_rules
+        if enabled_only:
+            rules = [r for r in rules if r["enabled"]]
+        return sorted(
+            [r.copy() for r in rules],
+            key=lambda r: (r["priority"], r["id"]),
+        )
+
+    def delete_project_rule(self, rule_id: int) -> None:
+        """Delete an assignment rule by ID"""
+        self.project_rules = [r for r in self.project_rules if r["id"] != rule_id]
+
+    def set_project_rule_enabled(self, rule_id: int, enabled: bool) -> None:
+        """Enable or disable an assignment rule"""
+        for rule in self.project_rules:
+            if rule["id"] == rule_id:
+                rule["enabled"] = enabled
+                break
 
     def close(self) -> None:
         """Close database (no-op for mock)"""

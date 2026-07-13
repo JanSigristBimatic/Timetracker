@@ -1,12 +1,10 @@
 import logging
-from datetime import datetime, timedelta
-import json
+from datetime import date, datetime, timedelta
 
-from PyQt6.QtCore import QDate, QEvent, Qt, QTimer
-
-logger = logging.getLogger(__name__)
-from PyQt6.QtGui import QFont, QFontMetrics
+from PyQt6.QtCore import QDate, QEvent, QSettings, Qt, QTimer
+from PyQt6.QtGui import QCursor, QFont, QFontMetrics, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
+    QButtonGroup,
     QComboBox,
     QDateEdit,
     QFrame,
@@ -16,83 +14,38 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSlider,
+    QSplitter,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from core.database_protocol import DatabaseProtocol
 from core.tracker import ActivityTracker
+from utils.config import get_env_int
 from utils.icon_cache import IconCache
+from utils.window_title_parser import extract_filename_from_title
 
+from .calendar_import_dialog import CalendarImportDialog
 from .export_dialog import ExportDialog
+from .manual_entry_dialog import ManualEntryDialog
+from .period_views import MonthView, WeekView
+from .project_drop_widget import ProjectDropWidget
 from .projects import ProjectManagerDialog
+from .rules_dialog import RulesDialog
 from .settings_dialog import SettingsDialog
+from .stats_sidebar import StatsSidebar
 from .timeline import TimelineWidget
-from .theme import get_theme
 
+logger = logging.getLogger(__name__)
 
-class ProjectDropWidget(QWidget):
-    """Widget that accepts drops for project assignment"""
+VIEW_DAY = 0
+VIEW_WEEK = 1
+VIEW_MONTH = 2
 
-    def __init__(self, project_id, project_name, main_window):
-        super().__init__()
-        self.project_id = project_id
-        self.project_name = project_name
-        self.main_window = main_window
-        self.theme = get_theme()
-        self.setAcceptDrops(True)
-        self.original_stylesheet = ""
-
-    def dragEnterEvent(self, event):
-        """Accept drag events with activity data"""
-        if event.mimeData().hasText():
-            event.acceptProposedAction()
-            # Save original stylesheet
-            self.original_stylesheet = self.styleSheet()
-            # Add visual feedback with border and lighter background
-            accent = self.theme.colors.accent
-            self.setStyleSheet(
-                self.original_stylesheet +
-                f"border: 2px dashed {accent}; background-color: rgba(52, 152, 219, 0.15);"
-            )
-
-    def dragLeaveEvent(self, event):
-        """Reset style when drag leaves"""
-        self.setStyleSheet(self.original_stylesheet)
-
-    def dropEvent(self, event):
-        """Handle drop of activities"""
-        self.setStyleSheet(self.original_stylesheet)
-        if event.mimeData().hasText():
-            try:
-                activity_data = json.loads(event.mimeData().text())
-                logger.debug(f"Received {len(activity_data)} activities to drop")
-
-                # Assign all activities to this project
-                total_count = 0
-                for act_data in activity_data:
-                    timestamp = datetime.fromisoformat(act_data['timestamp'])
-                    duration = act_data['duration']
-                    app_name = act_data['app_name']
-
-                    logger.debug(f"Processing activity - App: {app_name}, Start: {timestamp}, Duration: {duration}s")
-
-                    # Use timerange assignment for merged activities
-                    end_time = timestamp + timedelta(seconds=duration)
-                    count = self.main_window.database.assign_activities_by_timerange(
-                        timestamp, end_time, app_name, self.project_id
-                    )
-                    logger.debug(f"Assigned {count} activities for this timerange")
-                    total_count += count
-
-                logger.info(f"Assigned {total_count} activities to project '{self.project_name}'")
-
-                # Refresh timeline
-                self.main_window.load_timeline()
-
-                event.acceptProposedAction()
-            except Exception as e:
-                logger.error(f"Error dropping activities: {e}", exc_info=True)
+MAX_UNDO_STEPS = 20
+ZOOM_MIN = 30
+ZOOM_MAX = 200
 
 
 class MainWindow(QMainWindow):
@@ -103,66 +56,82 @@ class MainWindow(QMainWindow):
         self.database = database
         self.tracker = tracker
         self.current_date = datetime.now().date()
-        self.theme = get_theme()
 
-        # Icon cache
         self.icon_cache = IconCache()
+        self.undo_stack: list[dict] = []
+        self._day_activities: list[dict] = []
+        self._auto_scrolled_date = None
 
         self.setup_ui()
-        self.load_timeline()
+        self.setup_shortcuts()
+        self.restore_window_state()
+        self.load_current_view()
 
-        # Auto-refresh timeline every 30 seconds
+        # Auto-refresh (day view of today only; selection is preserved)
         self.refresh_timer = QTimer()
-        self.refresh_timer.timeout.connect(self.refresh_timeline)
+        self.refresh_timer.timeout.connect(self.auto_refresh)
         self.refresh_timer.start(30000)
+
+    # ------------------------------------------------------------------
+    # UI setup
+    # ------------------------------------------------------------------
 
     def setup_ui(self):
         """Setup the user interface"""
         self.setWindowTitle("TimeTracker")
         self.setGeometry(100, 100, 1200, 700)
 
-        # Central widget
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-
-        # Main layout
         layout = QVBoxLayout(central_widget)
 
-        # Top bar with date selector
-        top_bar = self.create_top_bar()
-        layout.addLayout(top_bar)
+        layout.addLayout(self.create_top_bar())
 
-        # Main content area (timeline + stats sidebar)
-        content_layout = QHBoxLayout()
+        # Stacked views: day (timeline + sidebar), week, month
+        self.view_stack = QStackedWidget()
 
-        # Timeline widget
         self.timeline = TimelineWidget(self.database)
+        self.timeline.data_changed.connect(self.load_current_view)
+        self.timeline.undoable_action.connect(self.push_undo)
+        self.timeline.manual_entry_requested.connect(self.open_manual_entry)
+
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidget(self.timeline)
         self.scroll_area.setWidgetResizable(True)
-
-        # Prevent scroll area from handling wheel events when Ctrl is pressed
         self.scroll_area.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOn
         )
-
-        # Install event filter to handle Ctrl+Wheel zoom
         self.scroll_area.installEventFilter(self)
         self.scroll_area.viewport().installEventFilter(self)
 
-        content_layout.addWidget(self.scroll_area, stretch=3)
+        self.stats_sidebar = StatsSidebar(self.database, self.icon_cache)
+        self.stats_sidebar.app_clicked.connect(self.select_app_activities)
+        self.stats_sidebar.file_clicked.connect(self.select_file_activities)
+        self.stats_sidebar.assignment_made.connect(self.on_drop_assignment)
 
-        # Day statistics sidebar
-        self.stats_sidebar = self.create_stats_sidebar()
-        content_layout.addWidget(self.stats_sidebar, stretch=1)
+        self.day_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.day_splitter.addWidget(self.scroll_area)
+        self.day_splitter.addWidget(self.stats_sidebar)
+        self.day_splitter.setStretchFactor(0, 3)
+        self.day_splitter.setStretchFactor(1, 1)
+        self.day_splitter.setSizes([750, 420])
+        self.view_stack.addWidget(self.day_splitter)
 
-        layout.addLayout(content_layout)
+        self.week_view = WeekView()
+        self.week_view.day_clicked.connect(self.jump_to_day)
+        self.view_stack.addWidget(self.week_view)
 
-        # Filter bar
-        filter_bar = self.create_filter_bar()
-        layout.addLayout(filter_bar)
+        self.month_view = MonthView()
+        self.month_view.day_clicked.connect(self.jump_to_day)
+        self.view_stack.addWidget(self.month_view)
 
-        # Recent projects bar (between filters and stats)
+        layout.addWidget(self.view_stack, stretch=1)
+
+        # Filter bar (day view only)
+        self.filter_bar = self.create_filter_bar()
+        layout.addWidget(self.filter_bar)
+
+        # Recent projects bar (day view only)
         self.recent_projects_bar = self.create_recent_projects_bar()
         layout.addWidget(self.recent_projects_bar)
 
@@ -176,9 +145,11 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout()
 
         # Date navigation
-        prev_day_btn = QPushButton("◀ Vorheriger Tag")
-        prev_day_btn.clicked.connect(self.previous_day)
-        layout.addWidget(prev_day_btn)
+        self.prev_btn = QPushButton("◀")
+        self.prev_btn.setMaximumWidth(36)
+        self.prev_btn.setToolTip("Vorheriger Zeitraum (Alt+Links)")
+        self.prev_btn.clicked.connect(self.previous_period)
+        layout.addWidget(self.prev_btn)
 
         self.date_edit = QDateEdit()
         self.date_edit.setDate(QDate.currentDate())
@@ -186,67 +157,130 @@ class MainWindow(QMainWindow):
         self.date_edit.dateChanged.connect(self.date_changed)
         layout.addWidget(self.date_edit)
 
-        next_day_btn = QPushButton("Nächster Tag ▶")
-        next_day_btn.clicked.connect(self.next_day)
-        layout.addWidget(next_day_btn)
+        self.next_btn = QPushButton("▶")
+        self.next_btn.setMaximumWidth(36)
+        self.next_btn.setToolTip("Nächster Zeitraum (Alt+Rechts)")
+        self.next_btn.clicked.connect(self.next_period)
+        layout.addWidget(self.next_btn)
 
         today_btn = QPushButton("Heute")
+        today_btn.setToolTip("Zum heutigen Tag (Strg+T)")
         today_btn.clicked.connect(self.go_to_today)
         layout.addWidget(today_btn)
 
+        layout.addSpacing(12)
+
+        # View switcher
+        self.view_group = QButtonGroup(self)
+        for index, label, tip in (
+            (VIEW_DAY, "Tag", "Tagesansicht (Strg+1)"),
+            (VIEW_WEEK, "Woche", "Wochenansicht (Strg+2)"),
+            (VIEW_MONTH, "Monat", "Monatsansicht (Strg+3)"),
+        ):
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setToolTip(tip)
+            if index == VIEW_DAY:
+                btn.setChecked(True)
+            self.view_group.addButton(btn, index)
+            layout.addWidget(btn)
+        self.view_group.idClicked.connect(self.switch_view)
+
         layout.addStretch()
 
-        # Zoom controls
-        zoom_label = QLabel("Zoom:")
-        layout.addWidget(zoom_label)
+        # Zoom controls (day view only)
+        self.zoom_widget = QWidget()
+        zoom_layout = QHBoxLayout(self.zoom_widget)
+        zoom_layout.setContentsMargins(0, 0, 0, 0)
+
+        zoom_layout.addWidget(QLabel("Zoom:"))
 
         zoom_out_btn = QPushButton("−")
         zoom_out_btn.setMaximumWidth(30)
         zoom_out_btn.clicked.connect(self.zoom_out)
-        layout.addWidget(zoom_out_btn)
+        zoom_layout.addWidget(zoom_out_btn)
 
         self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
-        self.zoom_slider.setMinimum(30)  # 30 pixels per hour
-        self.zoom_slider.setMaximum(200)  # 200 pixels per hour
-        self.zoom_slider.setValue(60)  # Default 60 pixels per hour
+        self.zoom_slider.setMinimum(ZOOM_MIN)
+        self.zoom_slider.setMaximum(ZOOM_MAX)
+        self.zoom_slider.setValue(60)
         self.zoom_slider.setMaximumWidth(150)
         self.zoom_slider.valueChanged.connect(self.zoom_changed)
-        layout.addWidget(self.zoom_slider)
+        zoom_layout.addWidget(self.zoom_slider)
 
         zoom_in_btn = QPushButton("+")
         zoom_in_btn.setMaximumWidth(30)
         zoom_in_btn.clicked.connect(self.zoom_in)
-        layout.addWidget(zoom_in_btn)
+        zoom_layout.addWidget(zoom_in_btn)
 
-        layout.addSpacing(20)
+        layout.addWidget(self.zoom_widget)
+        layout.addSpacing(12)
 
-        # Project management button
+        # Action buttons
+        entry_btn = QPushButton("+ Eintrag")
+        entry_btn.setToolTip(
+            "Manuellen Eintrag hinzufügen (Strg+N oder Doppelklick in Timeline)"
+        )
+        entry_btn.clicked.connect(lambda: self.open_manual_entry())
+        layout.addWidget(entry_btn)
+
         projects_btn = QPushButton("Projekte")
         projects_btn.clicked.connect(self.open_project_manager)
         layout.addWidget(projects_btn)
 
-        # AI Assignment button
-        ai_assign_btn = QPushButton("🤖 KI-Zuordnung")
+        rules_btn = QPushButton("Regeln")
+        rules_btn.setToolTip("Automatische Zuordnungsregeln verwalten")
+        rules_btn.clicked.connect(self.open_rules_dialog)
+        layout.addWidget(rules_btn)
+
+        ai_assign_btn = QPushButton("KI-Zuordnung")
         ai_assign_btn.clicked.connect(self.open_ai_assignment)
         ai_assign_btn.setProperty("class", "primary")
         layout.addWidget(ai_assign_btn)
 
-        # Export button
+        import_btn = QPushButton("Import")
+        import_btn.setToolTip("Kalender-Termine aus ICS-Datei importieren")
+        import_btn.clicked.connect(self.open_calendar_import)
+        layout.addWidget(import_btn)
+
         export_btn = QPushButton("Export")
+        export_btn.setToolTip("Daten exportieren (Strg+E)")
         export_btn.clicked.connect(self.open_export_dialog)
         layout.addWidget(export_btn)
 
-        # Settings button
         settings_btn = QPushButton("Einstellungen")
         settings_btn.clicked.connect(self.open_settings)
         layout.addWidget(settings_btn)
 
-        # Refresh button
-        refresh_btn = QPushButton("Aktualisieren")
-        refresh_btn.clicked.connect(self.refresh_timeline)
-        layout.addWidget(refresh_btn)
-
         return layout
+
+    def create_filter_bar(self) -> QWidget:
+        """Create filter bar"""
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        layout.addWidget(QLabel("Filter:"))
+
+        layout.addWidget(QLabel("Programm:"))
+        self.app_filter = QComboBox()
+        self.app_filter.addItem("Alle", None)
+        self.app_filter.currentIndexChanged.connect(self.apply_filters)
+        layout.addWidget(self.app_filter)
+
+        layout.addWidget(QLabel("Projekt:"))
+        self.project_filter = QComboBox()
+        self.project_filter.addItem("Alle", None)
+        self.project_filter.currentIndexChanged.connect(self.apply_filters)
+        layout.addWidget(self.project_filter)
+
+        clear_btn = QPushButton("Filter zurücksetzen")
+        clear_btn.clicked.connect(self.clear_filters)
+        layout.addWidget(clear_btn)
+
+        layout.addStretch()
+
+        return widget
 
     def create_recent_projects_bar(self):
         """Create bar with recently used projects for quick assignment"""
@@ -257,7 +291,6 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout(frame)
         layout.setContentsMargins(10, 5, 10, 5)
 
-        # Title with description
         title_label = QLabel("Zuletzt verwendet:")
         title_font = QFont()
         title_font.setPointSize(10)
@@ -265,7 +298,6 @@ class MainWindow(QMainWindow):
         title_label.setFont(title_font)
         layout.addWidget(title_label)
 
-        # Description
         desc_label = QLabel("(Aktivitäten per Drag & Drop hier zuordnen)")
         desc_font = QFont()
         desc_font.setPointSize(9)
@@ -274,7 +306,6 @@ class MainWindow(QMainWindow):
         desc_label.setProperty("class", "muted")
         layout.addWidget(desc_label)
 
-        # Container for project widgets
         self.recent_projects_container = QWidget()
         self.recent_projects_layout = QHBoxLayout(self.recent_projects_container)
         self.recent_projects_layout.setContentsMargins(0, 0, 0, 0)
@@ -285,20 +316,335 @@ class MainWindow(QMainWindow):
 
         return frame
 
+    def setup_shortcuts(self):
+        """Register keyboard shortcuts"""
+        QShortcut(QKeySequence("Alt+Left"), self, self.previous_period)
+        QShortcut(QKeySequence("Alt+Right"), self, self.next_period)
+        QShortcut(QKeySequence("Ctrl+T"), self, self.go_to_today)
+        QShortcut(QKeySequence("Ctrl+Z"), self, self.undo_last_action)
+        QShortcut(QKeySequence("Delete"), self, self.timeline.delete_selected)
+        QShortcut(QKeySequence("Ctrl+A"), self, self.timeline.select_all_visible)
+        QShortcut(QKeySequence("Ctrl+E"), self, self.open_export_dialog)
+        QShortcut(QKeySequence("Ctrl+N"), self, lambda: self.open_manual_entry())
+        QShortcut(QKeySequence("Ctrl+1"), self, lambda: self.set_view(VIEW_DAY))
+        QShortcut(QKeySequence("Ctrl+2"), self, lambda: self.set_view(VIEW_WEEK))
+        QShortcut(QKeySequence("Ctrl+3"), self, lambda: self.set_view(VIEW_MONTH))
+        QShortcut(QKeySequence("F5"), self, self.load_current_view)
+
+    # ------------------------------------------------------------------
+    # Window state persistence
+    # ------------------------------------------------------------------
+
+    def restore_window_state(self):
+        """Restore window geometry and splitter position"""
+        settings = QSettings("TimeTracker", "TimeTracker")
+
+        geometry = settings.value("mainwindow/geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
+
+        splitter_state = settings.value("mainwindow/splitter")
+        if splitter_state:
+            self.day_splitter.restoreState(splitter_state)
+
+        zoom = settings.value("mainwindow/zoom")
+        if zoom:
+            self.zoom_slider.setValue(int(zoom))
+
+    def save_window_state(self):
+        """Persist window geometry and splitter position"""
+        settings = QSettings("TimeTracker", "TimeTracker")
+        settings.setValue("mainwindow/geometry", self.saveGeometry())
+        settings.setValue("mainwindow/splitter", self.day_splitter.saveState())
+        settings.setValue("mainwindow/zoom", self.zoom_slider.value())
+
+    def closeEvent(self, event):
+        """Save state when the window is closed (app keeps running in tray)"""
+        self.save_window_state()
+        super().closeEvent(event)
+
+    # ------------------------------------------------------------------
+    # Navigation & views
+    # ------------------------------------------------------------------
+
+    def current_view(self) -> int:
+        return self.view_stack.currentIndex()
+
+    def set_view(self, index: int):
+        """Switch view programmatically (shortcut helper)"""
+        button = self.view_group.button(index)
+        if button:
+            button.setChecked(True)
+        self.switch_view(index)
+
+    def switch_view(self, index: int):
+        """Switch between day, week, and month view"""
+        self.view_stack.setCurrentIndex(index)
+
+        is_day = index == VIEW_DAY
+        self.zoom_widget.setVisible(is_day)
+        self.filter_bar.setVisible(is_day)
+        self.recent_projects_bar.setVisible(is_day)
+
+        self.load_current_view()
+
+    def jump_to_day(self, day: date):
+        """Switch to day view for the given date (from week/month view)"""
+        self.set_view(VIEW_DAY)
+        self.date_edit.setDate(QDate(day))
+
+    def previous_period(self):
+        """Go one day/week/month back depending on the active view"""
+        self._shift_date(-1)
+
+    def next_period(self):
+        """Go one day/week/month forward depending on the active view"""
+        self._shift_date(1)
+
+    def _shift_date(self, direction: int):
+        current = self.date_edit.date()
+        view = self.current_view()
+
+        if view == VIEW_WEEK:
+            self.date_edit.setDate(current.addDays(7 * direction))
+        elif view == VIEW_MONTH:
+            self.date_edit.setDate(current.addMonths(direction))
+        else:
+            self.date_edit.setDate(current.addDays(direction))
+
+    def go_to_today(self):
+        """Go to today"""
+        self.date_edit.setDate(QDate.currentDate())
+
+    def date_changed(self, qdate):
+        """Handle date change"""
+        self.current_date = qdate.toPyDate()
+        self.load_current_view()
+
+    def auto_refresh(self):
+        """Periodic refresh; only the live day view needs it"""
+        if self.current_view() == VIEW_DAY and self.current_date == date.today():
+            self.load_current_view()
+
+    # ------------------------------------------------------------------
+    # Data loading
+    # ------------------------------------------------------------------
+
+    def load_current_view(self):
+        """Reload data for the active view"""
+        view = self.current_view()
+        if view == VIEW_WEEK:
+            self.load_week_view()
+        elif view == VIEW_MONTH:
+            self.load_month_view()
+        else:
+            self.load_day_view()
+
+    def _load_range(self, start_day: date, end_day: date) -> list[dict]:
+        """Load activities for an inclusive day range (single query)."""
+        start_dt = datetime.combine(start_day, datetime.min.time())
+        end_dt = datetime.combine(end_day, datetime.max.time())
+        return self.database.get_activities(start_date=start_dt, end_date=end_dt)
+
+    def load_day_view(self):
+        """Load timeline for the current date (one DB query for all parts)"""
+        all_activities = self._load_range(self.current_date, self.current_date)
+        self._day_activities = all_activities
+        projects = self.database.get_projects()
+
+        filtered = self._apply_activity_filters(all_activities)
+
+        self.timeline.set_activities(filtered, self.current_date)
+        self.stats_sidebar.set_data(all_activities, projects)
+        self.update_stats(all_activities, len(filtered))
+        self.update_filter_options(all_activities, projects)
+        self.update_recent_projects_bar()
+        self._auto_scroll_to_now()
+
+    def _apply_activity_filters(self, activities: list[dict]) -> list[dict]:
+        """Apply app/project filter selection to the day's activities"""
+        selected_project = self.project_filter.currentData()
+        if selected_project == "NO_PROJECT":
+            activities = [a for a in activities if a.get("project_id") is None]
+        elif selected_project is not None:
+            activities = [
+                a for a in activities if a.get("project_id") == selected_project
+            ]
+
+        selected_app = self.app_filter.currentData()
+        if selected_app:
+            activities = [a for a in activities if a["app_name"] == selected_app]
+
+        return activities
+
+    def _auto_scroll_to_now(self):
+        """Scroll the day view to the current time (once per day switch)"""
+        if self.current_date != date.today():
+            return
+        if self._auto_scrolled_date == self.current_date:
+            return
+
+        self._auto_scrolled_date = self.current_date
+
+        def scroll():
+            y = self.timeline.now_line_y()
+            if y is not None:
+                viewport_height = self.scroll_area.viewport().height()
+                self.scroll_area.verticalScrollBar().setValue(
+                    max(0, y - viewport_height // 3)
+                )
+
+        QTimer.singleShot(0, scroll)
+
+    def load_week_view(self):
+        """Aggregate and display the week containing the selected date"""
+        monday = self.current_date - timedelta(days=self.current_date.weekday())
+        sunday = monday + timedelta(days=6)
+
+        activities = self._load_range(monday, sunday)
+        projects = self.database.get_projects()
+        project_map = {p['id']: p for p in projects}
+
+        day_project_seconds: dict[date, dict] = {}
+        for activity in activities:
+            if activity.get('is_idle', False):
+                continue
+
+            day = activity['timestamp'].date()
+            key = activity.get('project_id')
+            day_data = day_project_seconds.setdefault(day, {})
+            day_data[key] = day_data.get(key, 0) + activity['duration']
+
+        self.week_view.set_data(monday, day_project_seconds, project_map)
+        self._update_range_stats(activities, f"KW {monday.isocalendar()[1]}")
+
+    def load_month_view(self):
+        """Aggregate and display the month containing the selected date"""
+        first_day = self.current_date.replace(day=1)
+        if first_day.month == 12:
+            next_month = first_day.replace(year=first_day.year + 1, month=1)
+        else:
+            next_month = first_day.replace(month=first_day.month + 1)
+        last_day = next_month - timedelta(days=1)
+
+        activities = self._load_range(first_day, last_day)
+
+        day_seconds: dict[date, int] = {}
+        for activity in activities:
+            if activity.get('is_idle', False):
+                continue
+            day = activity['timestamp'].date()
+            day_seconds[day] = day_seconds.get(day, 0) + activity['duration']
+
+        self.month_view.set_data(first_day, day_seconds)
+        self._update_range_stats(activities, first_day.strftime('%B %Y'))
+
+    def _update_range_stats(self, activities: list[dict], label: str):
+        """Show summary stats for week/month views in the bottom bar"""
+        active_seconds = sum(
+            a['duration'] for a in activities if not a.get('is_idle', False)
+        )
+        days_with_data = len({
+            a['timestamp'].date() for a in activities
+            if not a.get('is_idle', False)
+        })
+        avg = active_seconds / days_with_data / 3600 if days_with_data else 0
+
+        self.stats_label.setText(
+            f"{label} | Aktiv: {active_seconds / 3600:.1f}h | "
+            f"Tage mit Daten: {days_with_data} | Ø pro Tag: {avg:.1f}h"
+        )
+
+    # ------------------------------------------------------------------
+    # Stats & filters (day view)
+    # ------------------------------------------------------------------
+
+    def update_stats(self, all_activities: list[dict], filtered_count: int):
+        """Update statistics display"""
+        if not all_activities:
+            self.stats_label.setText("Keine Aktivitäten für diesen Tag")
+            return
+
+        total_seconds = sum(a["duration"] for a in all_activities)
+        active_seconds = sum(
+            a["duration"] for a in all_activities
+            if not a.get("is_idle", False)
+        )
+
+        total_hours = total_seconds / 3600
+        active_hours = active_seconds / 3600
+        idle_hours = (total_seconds - active_seconds) / 3600
+
+        filter_info = ""
+        if filtered_count < len(all_activities):
+            filter_info = f" (Filter: {filtered_count} Aktivitäten)"
+
+        self.stats_label.setText(
+            f"Gesamt: {total_hours:.1f}h | "
+            f"Aktiv: {active_hours:.1f}h | "
+            f"Idle: {idle_hours:.1f}h | "
+            f"Aktivitäten: {len(all_activities)}{filter_info}"
+        )
+
+    def update_filter_options(self, all_activities: list[dict], projects: list[dict]):
+        """Update filter dropdown options from already loaded day data"""
+        apps = sorted(set(a["app_name"] for a in all_activities))
+        current_app = self.app_filter.currentData()
+
+        self.app_filter.blockSignals(True)
+        self.app_filter.clear()
+        self.app_filter.addItem("Alle", None)
+        for app in apps:
+            self.app_filter.addItem(app, app)
+
+        if current_app:
+            index = self.app_filter.findData(current_app)
+            if index >= 0:
+                self.app_filter.setCurrentIndex(index)
+
+        self.app_filter.blockSignals(False)
+
+        current_project = self.project_filter.currentData()
+
+        self.project_filter.blockSignals(True)
+        self.project_filter.clear()
+        self.project_filter.addItem("Alle", None)
+        self.project_filter.addItem("Ohne Projekt", "NO_PROJECT")
+        for project in projects:
+            self.project_filter.addItem(project["name"], project["id"])
+
+        if current_project:
+            index = self.project_filter.findData(current_project)
+            if index >= 0:
+                self.project_filter.setCurrentIndex(index)
+
+        self.project_filter.blockSignals(False)
+
+    def apply_filters(self):
+        """Apply selected filters"""
+        self.load_current_view()
+
+    def clear_filters(self):
+        """Clear all filters"""
+        self.app_filter.setCurrentIndex(0)
+        self.project_filter.setCurrentIndex(0)
+
     def update_recent_projects_bar(self):
         """Update the recently used projects bar"""
-        # Clear existing widgets
         while self.recent_projects_layout.count():
             child = self.recent_projects_layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
 
-        # Get recently used projects
         recent_projects = self.database.get_recently_used_projects(limit=10)
 
         for project in recent_projects:
-            # Create drop widget for each project
-            project_widget = ProjectDropWidget(project['id'], project['name'], self)
+            project_widget = ProjectDropWidget(
+                self.database,
+                project['id'],
+                project['name'],
+                on_assigned=self.on_drop_assignment,
+            )
             project_widget.setFixedHeight(30)
             project_widget.setMinimumWidth(80)
             project_widget.setMaximumWidth(150)
@@ -313,7 +659,6 @@ class MainWindow(QMainWindow):
             project_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             project_label.setWordWrap(False)
 
-            # Elide text if too long
             label_font = project_label.font()
             label_font.setBold(True)
             project_label.setFont(label_font)
@@ -328,676 +673,153 @@ class MainWindow(QMainWindow):
 
             self.recent_projects_layout.addWidget(project_widget)
 
-        # Add spacer if there are projects
         if recent_projects:
             self.recent_projects_layout.addStretch()
 
-    def create_filter_bar(self):
-        """Create filter bar"""
-        layout = QHBoxLayout()
+    # ------------------------------------------------------------------
+    # Undo
+    # ------------------------------------------------------------------
 
-        layout.addWidget(QLabel("Filter:"))
+    def push_undo(self, action: dict):
+        """Store an undoable action (assign or delete)"""
+        self.undo_stack.append(action)
+        if len(self.undo_stack) > MAX_UNDO_STEPS:
+            self.undo_stack.pop(0)
 
-        # App filter
-        layout.addWidget(QLabel("Programm:"))
-        self.app_filter = QComboBox()
-        self.app_filter.addItem("Alle", None)
-        self.app_filter.currentIndexChanged.connect(self.apply_filters)
-        layout.addWidget(self.app_filter)
+    def on_drop_assignment(self, action: dict):
+        """Drag & drop assignment happened: record undo and refresh"""
+        self.push_undo(action)
+        self.load_current_view()
 
-        # Project filter
-        layout.addWidget(QLabel("Projekt:"))
-        self.project_filter = QComboBox()
-        self.project_filter.addItem("Alle", None)
-        self.project_filter.currentIndexChanged.connect(self.apply_filters)
-        layout.addWidget(self.project_filter)
-
-        # Clear filters button
-        clear_btn = QPushButton("Filter zurücksetzen")
-        clear_btn.clicked.connect(self.clear_filters)
-        layout.addWidget(clear_btn)
-
-        layout.addStretch()
-
-        return layout
-
-    def create_stats_sidebar(self):
-        """Create statistics sidebar"""
-        sidebar = QFrame()
-        sidebar.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
-        sidebar.setMaximumWidth(550)
-        sidebar.setMinimumWidth(500)
-
-        layout = QVBoxLayout(sidebar)
-
-        # Title
-        title = QLabel("Tagesstatistik")
-        title_font = QFont()
-        title_font.setPointSize(14)
-        title_font.setBold(True)
-        title.setFont(title_font)
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title)
-
-        # Separator
-        separator = QFrame()
-        separator.setFrameShape(QFrame.Shape.HLine)
-        separator.setFrameShadow(QFrame.Shadow.Sunken)
-        layout.addWidget(separator)
-
-        # Stats content (scrollable)
-        stats_scroll = QScrollArea()
-        stats_scroll.setWidgetResizable(True)
-        stats_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-
-        stats_widget = QWidget()
-        self.stats_layout = QVBoxLayout(stats_widget)
-        self.stats_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-
-        stats_scroll.setWidget(stats_widget)
-        layout.addWidget(stats_scroll)
-
-        return sidebar
-
-    def update_stats_sidebar(self, activities):
-        """Update the statistics sidebar with project and app time"""
-        # Clear existing widgets
-        while self.stats_layout.count():
-            child = self.stats_layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-
-        if not activities:
-            no_data = QLabel("Keine Daten für diesen Tag")
-            no_data.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            no_data.setProperty("class", "muted")
-            self.stats_layout.addWidget(no_data)
+    def undo_last_action(self):
+        """Undo the most recent assign/delete action (Ctrl+Z)"""
+        if not self.undo_stack:
             return
 
-        # Get ALL activities for the day (not just filtered ones)
-        start_datetime = datetime.combine(self.current_date, datetime.min.time())
-        end_datetime = datetime.combine(self.current_date, datetime.max.time())
-        all_activities = self.database.get_activities(
-            start_date=start_datetime, end_date=end_datetime
-        )
+        action = self.undo_stack.pop()
 
-        # Calculate total time from all activities
-        total_seconds = sum(
-            a["duration"] for a in all_activities if not a.get("is_idle", False)
-        )
-
-        # --- Project Statistics ---
-        project_header = QLabel("Zeit pro Projekt")
-        project_header_font = QFont()
-        project_header_font.setPointSize(12)
-        project_header_font.setBold(True)
-        project_header.setFont(project_header_font)
-        project_header.setStyleSheet("margin-top: 10px; margin-bottom: 5px;")
-        self.stats_layout.addWidget(project_header)
-
-        # Project description
-        project_desc = QLabel("Drag & Drop zum Zuordnen")
-        project_desc_font = QFont()
-        project_desc_font.setPointSize(9)
-        project_desc_font.setItalic(True)
-        project_desc.setFont(project_desc_font)
-        project_desc.setProperty("class", "muted")
-        self.stats_layout.addWidget(project_desc)
-
-        # Group by project (use all activities, not filtered)
-        project_times = {}
-        unassigned_time = 0
-
-        for activity in all_activities:
-            if activity.get("is_idle", False):
-                continue
-
-            duration = activity["duration"]
-            project_id = activity.get("project_id")
-
-            if project_id:
-                if project_id not in project_times:
-                    project_times[project_id] = 0
-                project_times[project_id] += duration
-            else:
-                unassigned_time += duration
-
-        # Get project names and colors
-        projects = self.database.get_projects()
-        project_map = {p["id"]: p for p in projects}
-
-        # Sort projects by time (descending)
-        sorted_projects = sorted(
-            project_times.items(), key=lambda x: x[1], reverse=True
-        )
-
-        # Display projects
-        for project_id, seconds in sorted_projects:
-            project = project_map.get(project_id)
-            if not project:
-                continue
-
-            hours = seconds / 3600
-            percentage = (seconds / total_seconds * 100) if total_seconds > 0 else 0
-
-            # Project item (with drop support)
-            project_widget = ProjectDropWidget(project_id, project["name"], self)
-            project_layout = QHBoxLayout(project_widget)
-            project_layout.setContentsMargins(5, 5, 5, 5)
-
-            # Color indicator
-            color_label = QLabel()
-            color_label.setFixedSize(18, 18)
-            color_label.setStyleSheet(
-                f"background-color: {project['color']}; border-radius: 2px;"
-            )
-            color_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-            project_layout.addWidget(color_label)
-
-            # Project name (full text, scrollable)
-            name_label = QLabel(project["name"])
-            name_font = QFont()
-            name_font.setPointSize(11)
-            name_font.setBold(True)
-            name_label.setFont(name_font)
-            name_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-            name_label.setWordWrap(False)
-            name_label.setTextFormat(Qt.TextFormat.PlainText)
-            # Allow full width, scrolling will handle overflow
-            project_layout.addWidget(name_label, stretch=1)
-
-            # Time (ensure it's always visible)
-            time_label = QLabel(f"{hours:.1f}h ({percentage:.0f}%)")
-            time_font = QFont()
-            time_font.setPointSize(11)
-            time_label.setFont(time_font)
-            time_label.setAlignment(Qt.AlignmentFlag.AlignRight)
-            time_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-            time_label.setMinimumWidth(120)
-            project_layout.addWidget(time_label)
-
-            self.stats_layout.addWidget(project_widget)
-
-        # Unassigned time
-        if unassigned_time > 0:
-            hours = unassigned_time / 3600
-            percentage = (
-                (unassigned_time / total_seconds * 100) if total_seconds > 0 else 0
-            )
-
-            unassigned_widget = QWidget()
-            unassigned_layout = QHBoxLayout(unassigned_widget)
-            unassigned_layout.setContentsMargins(5, 5, 5, 5)
-
-            color_label = QLabel()
-            color_label.setFixedSize(18, 18)
-            color_label.setStyleSheet("background-color: #95a5a6; border-radius: 2px;")
-            unassigned_layout.addWidget(color_label)
-
-            name_label = QLabel("Ohne Projekt")
-            name_font = QFont()
-            name_font.setPointSize(11)
-            name_font.setItalic(True)
-            name_label.setFont(name_font)
-            name_label.setProperty("class", "muted")
-            unassigned_layout.addWidget(name_label, stretch=1)
-
-            time_label = QLabel(f"{hours:.1f}h ({percentage:.0f}%)")
-            time_font = QFont()
-            time_font.setPointSize(11)
-            time_label.setFont(time_font)
-            time_label.setAlignment(Qt.AlignmentFlag.AlignRight)
-            unassigned_layout.addWidget(time_label)
-
-            self.stats_layout.addWidget(unassigned_widget)
-
-        # --- App Statistics ---
-        app_header = QLabel("Zeit pro App")
-        app_header_font = QFont()
-        app_header_font.setPointSize(12)
-        app_header_font.setBold(True)
-        app_header.setFont(app_header_font)
-        app_header.setStyleSheet("margin-top: 15px; margin-bottom: 5px;")
-        self.stats_layout.addWidget(app_header)
-
-        # Group by app (use all activities, not filtered)
-        app_times = {}
-        for activity in all_activities:
-            if activity.get("is_idle", False):
-                continue
-
-            app_name = activity["app_name"]
-            duration = activity["duration"]
-
-            if app_name not in app_times:
-                app_times[app_name] = 0
-            app_times[app_name] += duration
-
-        # Sort apps by time (descending)
-        sorted_apps = sorted(app_times.items(), key=lambda x: x[1], reverse=True)
-
-        # Display top apps (limit to 10)
-        # Build app -> process_path mapping
-        app_paths = {}
-        for activity in all_activities:
-            if activity.get("process_path") and activity["app_name"] not in app_paths:
-                app_paths[activity["app_name"]] = activity["process_path"]
-
-        for app_name, seconds in sorted_apps[:10]:
-            hours = seconds / 3600
-            percentage = (seconds / total_seconds * 100) if total_seconds > 0 else 0
-
-            app_widget = QWidget()
-            app_layout = QHBoxLayout(app_widget)
-            app_layout.setContentsMargins(5, 5, 5, 5)
-
-            # Try to get app icon
-            if app_name in app_paths:
-                icon_pixmap = self.icon_cache.get_icon_pixmap(
-                    app_paths[app_name], size=32
+        if action['type'] == 'delete':
+            restored = self.database.restore_activities(action['rows'])
+            logger.info(f"Undo: {restored} Aktivitäten wiederhergestellt")
+        elif action['type'] == 'assign':
+            for activity_id, old_project_id in action['changes']:
+                self.database.assign_activity_to_project(
+                    activity_id, old_project_id, update_last_used=False
                 )
-                if icon_pixmap and not icon_pixmap.isNull():
-                    # Scale icon to exact size
-                    scaled_icon = icon_pixmap.scaled(
-                        24,
-                        24,
-                        Qt.AspectRatioMode.IgnoreAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation,
-                    )
-                    icon_label = QLabel()
-                    icon_label.setPixmap(scaled_icon)
-                    icon_label.setFixedSize(24, 24)
-                    app_layout.addWidget(icon_label)
+            logger.info(f"Undo: {len(action['changes'])} Zuordnungen zurückgesetzt")
 
-            # App name (clickable)
-            name_label = QLabel(app_name)
-            name_font = QFont()
-            name_font.setPointSize(11)
-            name_label.setFont(name_font)
-            name_label.setCursor(Qt.CursorShape.PointingHandCursor)
-            name_label.mousePressEvent = lambda event, app=app_name: self.select_app_activities(app)
-            app_layout.addWidget(name_label, stretch=1)
+        self.load_current_view()
 
-            # Time
-            time_label = QLabel(f"{hours:.1f}h ({percentage:.0f}%)")
-            time_font = QFont()
-            time_font.setPointSize(11)
-            time_label.setFont(time_font)
-            time_label.setAlignment(Qt.AlignmentFlag.AlignRight)
-            app_layout.addWidget(time_label)
-
-            self.stats_layout.addWidget(app_widget)
-
-        # Show "and X more" if there are more apps
-        if len(sorted_apps) > 10:
-            more_label = QLabel(f"... und {len(sorted_apps) - 10} weitere Apps")
-            more_label.setProperty("class", "muted")
-            more_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.stats_layout.addWidget(more_label)
-
-        # --- File Statistics ---
-        file_header = QLabel("Zeit pro Datei")
-        file_header_font = QFont()
-        file_header_font.setPointSize(12)
-        file_header_font.setBold(True)
-        file_header.setFont(file_header_font)
-        file_header.setStyleSheet("margin-top: 15px; margin-bottom: 5px;")
-        self.stats_layout.addWidget(file_header)
-
-        # Extract filenames from window titles and group by file
-        file_times = {}
-        file_app_paths = {}  # Store app path for each file to get icon
-        for activity in all_activities:
-            if activity.get("is_idle", False):
-                continue
-
-            window_title = activity.get("window_title", "")
-            if not window_title:
-                continue
-
-            duration = activity["duration"]
-            app_name = activity["app_name"]
-            process_path = activity.get("process_path", "")
-
-            # Try to extract filename from window title
-            filename = self.extract_filename_from_title(window_title)
-            if filename and filename != "Keine Datei erkannt":
-                if filename not in file_times:
-                    file_times[filename] = 0
-                    if process_path:
-                        file_app_paths[filename] = process_path
-                file_times[filename] += duration
-
-        # Sort files by time (descending)
-        sorted_files = sorted(file_times.items(), key=lambda x: x[1], reverse=True)
-
-        # Display top files (limit to 10, only show files with > 60 seconds)
-        displayed_files = 0
-        for filename, seconds in sorted_files:
-            if seconds <= 60:  # Skip files with less than 1 minute
-                continue
-            if displayed_files >= 10:  # Limit to 10
-                break
-
-            hours = seconds / 3600
-            percentage = (seconds / total_seconds * 100) if total_seconds > 0 else 0
-
-            file_widget = QWidget()
-            file_layout = QHBoxLayout(file_widget)
-            file_layout.setContentsMargins(5, 5, 5, 5)
-
-            # Try to get app icon
-            if filename in file_app_paths:
-                icon_pixmap = self.icon_cache.get_icon_pixmap(
-                    file_app_paths[filename], size=32
-                )
-                if icon_pixmap and not icon_pixmap.isNull():
-                    # Scale icon to exact size
-                    scaled_icon = icon_pixmap.scaled(
-                        24,
-                        24,
-                        Qt.AspectRatioMode.IgnoreAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation,
-                    )
-                    icon_label = QLabel()
-                    icon_label.setPixmap(scaled_icon)
-                    icon_label.setFixedSize(24, 24)
-                    file_layout.addWidget(icon_label)
-
-            # File name (clickable)
-            name_label = QLabel(filename)
-            name_font = QFont()
-            name_font.setPointSize(11)
-            name_label.setFont(name_font)
-            name_label.setCursor(Qt.CursorShape.PointingHandCursor)
-            name_label.mousePressEvent = lambda event, file=filename: self.select_file_activities(file)
-            file_layout.addWidget(name_label, stretch=1)
-
-            # Time
-            time_label = QLabel(f"{hours:.1f}h ({percentage:.0f}%)")
-            time_font = QFont()
-            time_font.setPointSize(11)
-            time_label.setFont(time_font)
-            time_label.setAlignment(Qt.AlignmentFlag.AlignRight)
-            file_layout.addWidget(time_label)
-
-            self.stats_layout.addWidget(file_widget)
-            displayed_files += 1
-
-        # Show "and X more" if there are more files
-        remaining_files = len([f for f in sorted_files if f[1] > 60]) - displayed_files
-        if remaining_files > 0:
-            more_label = QLabel(f"... und {remaining_files} weitere Dateien")
-            more_label.setProperty("class", "muted")
-            more_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.stats_layout.addWidget(more_label)
-
-        # Show message if no files detected
-        if displayed_files == 0:
-            no_files_label = QLabel("Keine Dateien erkannt")
-            no_files_label.setProperty("class", "muted")
-            no_files_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.stats_layout.addWidget(no_files_label)
-
-    def extract_filename_from_title(self, window_title):
-        """Extract filename or relevant content from window title"""
-        import re
-
-        if not window_title:
-            return None
-
-        # Pattern 1: Autodesk/CAD style - "Program - [filename.ext]" or "Program [filename.ext]"
-        autodesk_match = re.search(r"\[([^\]]+\.[a-zA-Z0-9]+)\]", window_title)
-        if autodesk_match:
-            return autodesk_match.group(1)
-
-        # Pattern 1b: Cyclone 3DR - "project_name - Cyclone 3DR version"
-        cyclone_match = re.match(r"^(.+?)\s*-\s*Cyclone 3DR", window_title)
-        if cyclone_match:
-            return cyclone_match.group(1).strip()
-
-        # Pattern 1c: Revit - "project_name - Autodesk Revit" or similar
-        revit_match = re.match(r"^(.+?)\s*-\s*(Autodesk\s+)?Revit", window_title)
-        if revit_match:
-            return revit_match.group(1).strip()
-
-        # Pattern 1d: Blender - "filename.blend - Blender" or "Blender - filename.blend"
-        blender_match = re.search(r"(.+?\.blend)", window_title)
-        if blender_match and "Blender" in window_title:
-            return blender_match.group(1).strip()
-
-        # Pattern 2: Teams chat - "Chat | Person Name | ..."
-        teams_match = re.search(r"Chat\s*\|\s*([^|]+?)\s*\|", window_title)
-        if teams_match:
-            return teams_match.group(1).strip()
-
-        # Pattern 3: Slack - "#channel-name | Workspace - Slack"
-        slack_match = re.search(r"^(#[^\|]+)\s*\|", window_title)
-        if slack_match:
-            return slack_match.group(1).strip()
-
-        # Pattern 4: Zoom - "Zoom Meeting - Meeting Name" or "Zoom Meeting"
-        zoom_match = re.match(r"^Zoom Meeting\s*-\s*(.+)", window_title)
-        if zoom_match:
-            return zoom_match.group(1).strip()
-
-        # Pattern 5: JetBrains IDEs - "filename.ext - Project [Path] - IDE"
-        jetbrains_match = re.match(
-            r"^([^\-]+\.[a-zA-Z0-9]+)\s*-\s*([^\[]+)", window_title
-        )
-        if jetbrains_match and (
-            "PyCharm" in window_title
-            or "IntelliJ" in window_title
-            or "WebStorm" in window_title
-            or "PhpStorm" in window_title
-        ):
-            filename = jetbrains_match.group(1).strip()
-            project = jetbrains_match.group(2).strip()
-            return f"{filename} - {project}"
-
-        # Pattern 6: VS Code style - "content... - Project - Visual Studio Code"
-        vscode_match = re.match(
-            r"^(.+?)\s*-\s*([^-]+)\s*-\s*Visual Studio Code", window_title
-        )
-        if vscode_match:
-            content = vscode_match.group(1).strip()
-            project = vscode_match.group(2).strip()
-            return f"{content} - {project}"
-
-        # Pattern 7: Microsoft Office - "filename.ext - Word/Excel/PowerPoint"
-        office_match = re.match(
-            r"^(.+?\.(docx?|xlsx?|pptx?|pdf))\s*-\s*(Microsoft\s+)?(Word|Excel|PowerPoint|Outlook)",
-            window_title,
-            re.IGNORECASE,
-        )
-        if office_match:
-            return office_match.group(1)
-
-        # Pattern 8: Adobe Reader/Acrobat - "filename.pdf - Adobe..."
-        adobe_match = re.match(r"^(.+?\.pdf)\s*-\s*Adobe", window_title, re.IGNORECASE)
-        if adobe_match:
-            return adobe_match.group(1)
-
-        # Pattern 9: Notepad++ - "filename.ext - Notepad++"
-        notepad_match = re.match(
-            r"^(.+?\.[a-zA-Z0-9]+)\s*-\s*Notepad\+\+", window_title
-        )
-        if notepad_match:
-            return notepad_match.group(1)
-
-        # Pattern 10: Browsers - "Page Title - Browser Name"
-        browser_match = re.match(
-            r"^(.+?)\s*-\s*(Google Chrome|Mozilla Firefox|Microsoft Edge|Opera|Safari|Brave)$",
-            window_title,
-        )
-        if browser_match:
-            page_title = browser_match.group(1).strip()
-            # Limit very long page titles
-            return page_title[:80] if len(page_title) > 80 else page_title
-
-        # Pattern 11: Outlook - various formats
-        if "Outlook" in window_title:
-            # Remove " - Outlook" suffix
-            outlook_cleaned = re.sub(
-                r"\s*-\s*(Microsoft\s+)?Outlook.*$", "", window_title
-            )
-            if outlook_cleaned:
-                # For inbox view, take first part
-                parts = outlook_cleaned.split(" - ")
-                return parts[0].strip()[:60]
-
-        # Pattern 12: Figma - "Design Name - Figma"
-        figma_match = re.match(r"^(.+?)\s*-\s*Figma$", window_title)
-        if figma_match:
-            return figma_match.group(1).strip()
-
-        # Pattern 13: General file with extension
-        file_match = re.search(r'([^\\/:\*\?"<>\|]+\.[a-zA-Z0-9]+)', window_title)
-        if file_match:
-            filename = file_match.group(1)
-            # Remove common application suffixes
-            filename = re.sub(
-                r"\s*-\s*(Visual Studio Code|Notepad|Word|Excel|PowerPoint|Adobe|Reader).*$",
-                "",
-                filename,
-            )
-            return filename.strip()
-
-        # Pattern 14: For other apps, extract first meaningful part
-        # Remove common app names at the end
-        cleaned = re.sub(
-            r"\s*-\s*(Microsoft Teams|Google Chrome|Firefox|Edge|Outlook|Discord|Spotify)$",
-            "",
-            window_title,
-        )
-
-        # If we removed something and there's still content, return it
-        if cleaned != window_title and cleaned.strip():
-            # Limit length and take first part if multiple separators
-            parts = cleaned.split(" - ")
-            if len(parts) > 0:
-                result = parts[0].strip()
-                return result[:60] if len(result) > 60 else result
-
-        return None
-
-    def previous_day(self):
-        """Go to previous day"""
-        current = self.date_edit.date()
-        self.date_edit.setDate(current.addDays(-1))
-
-    def next_day(self):
-        """Go to next day"""
-        current = self.date_edit.date()
-        self.date_edit.setDate(current.addDays(1))
-
-    def go_to_today(self):
-        """Go to today"""
-        self.date_edit.setDate(QDate.currentDate())
-
-    def date_changed(self, qdate):
-        """Handle date change"""
-        self.current_date = qdate.toPyDate()
-        self.load_timeline()
-
-    def load_timeline(self):
-        """Load timeline for current date"""
-        start_datetime = datetime.combine(self.current_date, datetime.min.time())
-        end_datetime = datetime.combine(self.current_date, datetime.max.time())
-
-        # Get selected filters
-        selected_project = self.project_filter.currentData()
-
-        # Handle "Ohne Projekt" filter
-        if selected_project == "NO_PROJECT":
-            activities = self.database.get_activities(
-                start_date=start_datetime,
-                end_date=end_datetime,
-            )
-            # Filter to only activities without project
-            activities = [a for a in activities if a.get("project_id") is None]
-        else:
-            activities = self.database.get_activities(
-                start_date=start_datetime,
-                end_date=end_datetime,
-                project_id=selected_project,
-            )
-
-        # Apply app filter
-        selected_app = self.app_filter.currentData()
-        if selected_app:
-            activities = [a for a in activities if a["app_name"] == selected_app]
-
-        self.timeline.set_activities(activities, self.current_date)
-        self.update_stats(activities)
-        self.update_stats_sidebar(activities)
-        self.update_filter_options()
-        self.update_recent_projects_bar()
-
-    def refresh_timeline(self):
-        """Refresh the timeline"""
-        self.load_timeline()
-
-    def update_stats(self, activities):
-        """Update statistics display"""
-        # Get ALL activities for the day for correct total time
-        start_datetime = datetime.combine(self.current_date, datetime.min.time())
-        end_datetime = datetime.combine(self.current_date, datetime.max.time())
-        all_activities = self.database.get_activities(
-            start_date=start_datetime, end_date=end_datetime
-        )
-
-        if not all_activities:
-            self.stats_label.setText("Keine Aktivitäten für diesen Tag")
-            return
-
-        # Calculate total from all activities
-        total_seconds = sum(activity["duration"] for activity in all_activities)
-        active_seconds = sum(
-            activity["duration"]
-            for activity in all_activities
-            if not activity.get("is_idle", False)
-        )
-
-        total_hours = total_seconds / 3600
-        active_hours = active_seconds / 3600
-        idle_hours = (total_seconds - active_seconds) / 3600
-
-        # Show filtered count if filter is active
-        filter_info = ""
-        if len(activities) < len(all_activities):
-            filter_info = f" (Filter: {len(activities)} Aktivitäten)"
-
-        stats_text = (
-            f"Gesamt: {total_hours:.1f}h | "
-            f"Aktiv: {active_hours:.1f}h | "
-            f"Idle: {idle_hours:.1f}h | "
-            f"Aktivitäten: {len(all_activities)}{filter_info}"
-        )
-
-        self.stats_label.setText(stats_text)
+    # ------------------------------------------------------------------
+    # Zoom
+    # ------------------------------------------------------------------
 
     def zoom_in(self):
         """Zoom in (increase hour height)"""
-        current = self.zoom_slider.value()
-        self.zoom_slider.setValue(min(current + 10, 200))
+        self.zoom_slider.setValue(min(self.zoom_slider.value() + 10, ZOOM_MAX))
 
     def zoom_out(self):
         """Zoom out (decrease hour height)"""
-        current = self.zoom_slider.value()
-        self.zoom_slider.setValue(max(current - 10, 30))
+        self.zoom_slider.setValue(max(self.zoom_slider.value() - 10, ZOOM_MIN))
 
     def zoom_changed(self, value):
         """Handle zoom slider change"""
         self.timeline.set_zoom(value)
-        self.timeline.update()
+
+    def eventFilter(self, obj, event):
+        """Handle Ctrl+Wheel zoom anchored at the cursor position"""
+        if event.type() == QEvent.Type.Wheel:
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                if self.current_view() == VIEW_DAY:
+                    self._zoom_at_cursor(event.angleDelta().y())
+                event.accept()
+                return True
+        return super().eventFilter(obj, event)
+
+    def _zoom_at_cursor(self, delta: int):
+        """Zoom while keeping the time under the mouse cursor stable"""
+        old_height = self.timeline.hour_height
+        step = 5 if delta > 0 else -5
+        new_height = min(ZOOM_MAX, max(ZOOM_MIN, old_height + step))
+
+        if new_height == old_height:
+            return
+
+        viewport = self.scroll_area.viewport()
+        cursor_y = viewport.mapFromGlobal(QCursor.pos()).y()
+        cursor_y = min(max(cursor_y, 0), viewport.height())
+
+        scrollbar = self.scroll_area.verticalScrollBar()
+        timeline_y = scrollbar.value() + cursor_y
+        hours_at_cursor = (
+            (timeline_y - self.timeline.top_margin) / old_height
+        )
+
+        # Triggers timeline.set_zoom via valueChanged
+        self.zoom_slider.setValue(new_height)
+
+        def restore_anchor():
+            new_y = self.timeline.top_margin + hours_at_cursor * new_height
+            scrollbar.setValue(int(new_y - cursor_y))
+
+        # Wait one event loop cycle so the scroll range is updated first
+        QTimer.singleShot(0, restore_anchor)
+
+    # ------------------------------------------------------------------
+    # Selection helpers (sidebar clicks)
+    # ------------------------------------------------------------------
+
+    def select_app_activities(self, app_name: str):
+        """Select all activities for a specific app"""
+        app_index = self.app_filter.findData(app_name)
+        if app_index >= 0:
+            self.app_filter.setCurrentIndex(app_index)
+
+        filtered = self._apply_activity_filters(self._day_activities)
+        matching = [a for a in filtered if a["app_name"] == app_name]
+        self.timeline.select_all_activities(matching)
+
+    def select_file_activities(self, filename: str):
+        """Select all activities for a specific file"""
+        filtered = self._apply_activity_filters(self._day_activities)
+
+        matching = []
+        for activity in filtered:
+            window_title = activity.get("window_title", "")
+            if window_title and extract_filename_from_title(window_title) == filename:
+                matching.append(activity)
+
+        self.timeline.select_all_activities(matching)
+
+    # ------------------------------------------------------------------
+    # Dialogs
+    # ------------------------------------------------------------------
 
     def open_project_manager(self):
         """Open project management dialog"""
         dialog = ProjectManagerDialog(self.database, self)
+        dialog.exec()
+        self.load_current_view()
+
+    def open_rules_dialog(self):
+        """Open assignment rules dialog"""
+        dialog = RulesDialog(self.database, self)
+        dialog.exec()
+        # Tracker uses a cached rule set; refresh it after changes
+        self.tracker.rules_engine.reload()
+        self.load_current_view()
+
+    def open_manual_entry(self, start: datetime = None):
+        """Open manual entry dialog (button, Ctrl+N, or timeline double click)"""
+        dialog = ManualEntryDialog(self.database, start=start, parent=self)
         if dialog.exec():
-            # Reload timeline to show updated project colors
-            self.load_timeline()
+            self.load_current_view()
+
+    def open_calendar_import(self):
+        """Open ICS calendar import dialog"""
+        dialog = CalendarImportDialog(self.database, self)
+        if dialog.exec():
+            self.load_current_view()
 
     def open_export_dialog(self):
         """Open export dialog"""
@@ -1005,152 +827,22 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def open_settings(self):
-        """Open settings dialog"""
-        dialog = SettingsDialog(self)
-        dialog.exec()
+        """Open settings dialog and apply changes live"""
+        dialog = SettingsDialog(self.database, self)
+        if dialog.exec():
+            self.apply_runtime_settings()
+            self.load_current_view()
+
+    def apply_runtime_settings(self):
+        """Apply saved settings to running components without restart"""
+        self.tracker.poll_interval = get_env_int('POLL_INTERVAL', 2)
+        self.tracker.idle_threshold = get_env_int('IDLE_THRESHOLD', 300)
+        self.timeline.reload_settings()
 
     def open_ai_assignment(self):
-        """Öffnet KI-Zuordnungs-Dialog"""
+        """Open AI assignment dialog"""
         from .assignment_suggestions import AssignmentSuggestionsDialog
 
         dialog = AssignmentSuggestionsDialog(self.database, self)
         if dialog.exec():
-            # Refresh nach Zuordnung
-            self.load_timeline()
-
-    def eventFilter(self, obj, event):
-        """Filter events to handle Ctrl+Wheel zoom without scrolling"""
-        if event.type() == QEvent.Type.Wheel:
-            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-                # Ctrl+Wheel: Zoom without scrolling
-                # Forward to timeline widget for zoom handling
-                self.timeline.wheelEvent(event)
-                event.accept()
-                return True  # Event handled, block scrolling completely
-        return super().eventFilter(obj, event)
-
-    def update_filter_options(self):
-        """Update filter dropdown options based on current date"""
-        start_datetime = datetime.combine(self.current_date, datetime.min.time())
-        end_datetime = datetime.combine(self.current_date, datetime.max.time())
-
-        # Get all activities for this date
-        all_activities = self.database.get_activities(
-            start_date=start_datetime, end_date=end_datetime
-        )
-
-        # Get unique apps
-        apps = sorted(set(a["app_name"] for a in all_activities))
-        current_app = self.app_filter.currentData()
-
-        self.app_filter.blockSignals(True)
-        self.app_filter.clear()
-        self.app_filter.addItem("Alle", None)
-        for app in apps:
-            self.app_filter.addItem(app, app)
-
-        # Restore selection if still valid
-        if current_app:
-            index = self.app_filter.findData(current_app)
-            if index >= 0:
-                self.app_filter.setCurrentIndex(index)
-
-        self.app_filter.blockSignals(False)
-
-        # Get all projects
-        projects = self.database.get_projects()
-        current_project = self.project_filter.currentData()
-
-        self.project_filter.blockSignals(True)
-        self.project_filter.clear()
-        self.project_filter.addItem("Alle", None)
-        self.project_filter.addItem("Ohne Projekt", "NO_PROJECT")
-        for project in projects:
-            self.project_filter.addItem(project["name"], project["id"])
-
-        # Restore selection if still valid
-        if current_project:
-            index = self.project_filter.findData(current_project)
-            if index >= 0:
-                self.project_filter.setCurrentIndex(index)
-
-        self.project_filter.blockSignals(False)
-
-    def apply_filters(self):
-        """Apply selected filters"""
-        self.load_timeline()
-
-    def clear_filters(self):
-        """Clear all filters"""
-        self.app_filter.setCurrentIndex(0)
-        self.project_filter.setCurrentIndex(0)
-
-    def select_app_activities(self, app_name):
-        """Select all activities for a specific app"""
-        # Filter by app if not already filtered
-        app_index = self.app_filter.findData(app_name)
-        if app_index >= 0:
-            self.app_filter.setCurrentIndex(app_index)
-
-        # Get all activities matching the current filter (which now includes the app)
-        start_datetime = datetime.combine(self.current_date, datetime.min.time())
-        end_datetime = datetime.combine(self.current_date, datetime.max.time())
-
-        selected_project = self.project_filter.currentData()
-
-        # Handle "Ohne Projekt" filter
-        if selected_project == "NO_PROJECT":
-            activities = self.database.get_activities(
-                start_date=start_datetime,
-                end_date=end_datetime,
-            )
-            activities = [a for a in activities if a.get("project_id") is None and a["app_name"] == app_name]
-        else:
-            activities = self.database.get_activities(
-                start_date=start_datetime,
-                end_date=end_datetime,
-                project_id=selected_project,
-            )
-            activities = [a for a in activities if a["app_name"] == app_name]
-
-        # Select all activities in timeline
-        self.timeline.select_all_activities(activities)
-
-    def select_file_activities(self, filename):
-        """Select all activities for a specific file"""
-        # Get all activities for the day
-        start_datetime = datetime.combine(self.current_date, datetime.min.time())
-        end_datetime = datetime.combine(self.current_date, datetime.max.time())
-
-        selected_project = self.project_filter.currentData()
-
-        # Handle "Ohne Projekt" filter
-        if selected_project == "NO_PROJECT":
-            activities = self.database.get_activities(
-                start_date=start_datetime,
-                end_date=end_datetime,
-            )
-            activities = [a for a in activities if a.get("project_id") is None]
-        else:
-            activities = self.database.get_activities(
-                start_date=start_datetime,
-                end_date=end_datetime,
-                project_id=selected_project,
-            )
-
-        # Apply app filter if active
-        selected_app = self.app_filter.currentData()
-        if selected_app:
-            activities = [a for a in activities if a["app_name"] == selected_app]
-
-        # Filter by filename extracted from window title
-        matching_activities = []
-        for activity in activities:
-            window_title = activity.get("window_title", "")
-            if window_title:
-                extracted_filename = self.extract_filename_from_title(window_title)
-                if extracted_filename == filename:
-                    matching_activities.append(activity)
-
-        # Select all matching activities in timeline
-        self.timeline.select_all_activities(matching_activities)
+            self.load_current_view()

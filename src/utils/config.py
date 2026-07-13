@@ -73,3 +73,20 @@ def get_database_path():
     if env_path:
         return env_path
     return str(Path.home() / '.timetracker' / 'timetracker.db')
+
+def get_env_int(key: str, default: int) -> int:
+    """Read an integer environment variable, falling back on bad values."""
+    try:
+        return int(os.getenv(key, default))
+    except (TypeError, ValueError):
+        return default
+
+def get_user_env_path() -> Path:
+    """Path to the user-writable settings file.
+
+    Settings are stored in the user profile so they work for installed
+    versions too (no write access to the program directory needed).
+    """
+    config_dir = Path.home() / '.timetracker'
+    config_dir.mkdir(exist_ok=True)
+    return config_dir / '.env'

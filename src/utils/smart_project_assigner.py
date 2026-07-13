@@ -106,7 +106,11 @@ class SmartProjectAssigner:
 
     def suggest_project(self, activity: dict[str, Any]) -> Optional[int]:
         """
-        Schlägt ein Projekt für eine Aktivität vor
+        Schlägt ein Projekt für eine Aktivität vor.
+
+        Kombiniert App- und Keyword-Muster über den Konfidenz-Score,
+        damit Fenstertitel-Keywords den App-Standard überstimmen können
+        (wichtig für Browser und andere Mehrzweck-Apps).
 
         Args:
             activity: Aktivitätsdaten
@@ -117,27 +121,25 @@ class SmartProjectAssigner:
         app_name = activity["app_name"]
         window_title = activity.get("window_title", "").lower()
 
-        # Strategie 1: Exakte App-Übereinstimmung
+        # Sammle Kandidaten aus App-Muster und Keyword-Mustern
+        candidates: set[int] = set()
+
         if app_name in self.app_project_map:
-            return self.app_project_map[app_name]
+            candidates.add(self.app_project_map[app_name])
 
-        # Strategie 2: Keyword-Matching im Fenstertitel
         keywords = re.findall(r"\b\w{4,}\b", window_title)
-
-        # Zähle Matches pro Projekt
-        project_scores = defaultdict(int)
-
         for keyword in keywords:
             if keyword in self.keyword_project_map:
-                project_id = self.keyword_project_map[keyword]
-                project_scores[project_id] += 1
+                candidates.add(self.keyword_project_map[keyword])
 
-        # Nimm Projekt mit meisten Keyword-Matches
-        if project_scores:
-            best_project = max(project_scores.items(), key=lambda x: x[1])
-            return best_project[0]
+        if not candidates:
+            return None
 
-        return None
+        # Bewerte jeden Kandidaten mit dem Konfidenz-Score
+        best_project = max(
+            candidates, key=lambda pid: self.get_confidence(activity, pid)
+        )
+        return best_project
 
     def get_confidence(self, activity: dict[str, Any], project_id: int) -> float:
         """

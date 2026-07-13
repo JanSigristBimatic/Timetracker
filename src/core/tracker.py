@@ -1,15 +1,18 @@
 import logging
 import platform
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from threading import Event, Lock, Thread
 from typing import Optional
 
 from core.database_protocol import DatabaseProtocol
+from utils.assignment_rules import AssignmentRulesEngine
 from utils.config import should_ignore_activity
 from utils.social_media_detector import SocialMediaDetector
 
 logger = logging.getLogger(__name__)
+
+IDLE_APP_NAME = 'Idle'
 
 
 class ActivityTracker:
@@ -34,8 +37,11 @@ class ActivityTracker:
         self.poll_interval = poll_interval
         self.idle_threshold = idle_threshold
 
+        self.rules_engine = AssignmentRulesEngine(database)
+
         self._current_activity: Optional[dict] = None
         self._start_time: Optional[datetime] = None
+        self._idle_since: Optional[datetime] = None
         self._activity_lock = Lock()
 
         self.is_running = False
@@ -72,16 +78,18 @@ class ActivityTracker:
         self.tracker_thread.start()
 
     def stop(self):
-        """Stop tracking and save any pending activity."""
+        """Stop tracking and save any pending activity or idle period."""
         if not self.is_running:
             return
 
         self.is_running = False
         self.stop_event.set()
 
-        # Save current activity before stopping
         with self._activity_lock:
-            if self._current_activity and self._start_time:
+            if self._idle_since is not None:
+                self._save_idle_period(end_time=datetime.now())
+                self._idle_since = None
+            elif self._current_activity and self._start_time:
                 self._save_current_activity()
 
         if self.tracker_thread:
@@ -109,30 +117,78 @@ class ActivityTracker:
                 # Read idle/audio state outside the lock (these can be slow)
                 idle_time = self.platform_tracker.get_idle_time()
                 is_audio_playing = self.platform_tracker.is_audio_playing()
+                is_idle_now = (
+                    idle_time > self.idle_threshold and not is_audio_playing
+                )
 
                 with self._activity_lock:
-                    # Check if activity changed
-                    if current and self._is_activity_different(current):
-                        # Save previous activity
-                        if self._current_activity and self._start_time:
-                            self._save_current_activity()
+                    if is_idle_now:
+                        self._enter_idle_state(idle_time)
+                    else:
+                        self._exit_idle_state()
 
-                        # Start tracking new activity
-                        self._current_activity = current
-                        self._start_time = datetime.now()
+                        # Check if activity changed
+                        if current and self._is_activity_different(current):
+                            if self._current_activity and self._start_time:
+                                self._save_current_activity()
 
-                    # Consider idle only if: no input AND no audio playing
-                    if idle_time > self.idle_threshold and not is_audio_playing:
-                        if self._current_activity and not self._current_activity.get('is_idle'):
-                            # Mark as idle
-                            self._save_current_activity(is_idle=True)
-                            self._current_activity = None
-                            self._start_time = None
+                            self._current_activity = current
+                            self._start_time = datetime.now()
 
             except Exception as e:
                 logger.error(f"Error in tracking loop: {e}")
 
             time.sleep(self.poll_interval)
+
+    def _enter_idle_state(self, idle_time: float) -> None:
+        """Handle transition into idle: close the active work at the
+        moment input stopped, so idle time never counts as work.
+
+        Note:
+            Must be called with _activity_lock held.
+        """
+        if self._idle_since is not None:
+            return  # Already idle, keep waiting
+
+        idle_started = datetime.now() - timedelta(seconds=idle_time)
+
+        if self._current_activity and self._start_time:
+            self._save_current_activity(end_time=idle_started)
+
+        self._current_activity = None
+        self._start_time = None
+        self._idle_since = idle_started
+
+    def _exit_idle_state(self) -> None:
+        """Handle transition out of idle: store the idle period as its
+        own block so the timeline shows the gap explicitly.
+
+        Note:
+            Must be called with _activity_lock held.
+        """
+        if self._idle_since is None:
+            return
+
+        self._save_idle_period(end_time=datetime.now())
+        self._idle_since = None
+
+    def _save_idle_period(self, end_time: datetime) -> None:
+        """Save the elapsed idle period as an idle activity.
+
+        Note:
+            Must be called with _activity_lock held.
+        """
+        if self._idle_since is None:
+            return
+
+        if (end_time - self._idle_since).total_seconds() >= 1:
+            self.database.save_activity(
+                app_name=IDLE_APP_NAME,
+                window_title='',
+                start_time=self._idle_since,
+                end_time=end_time,
+                is_idle=True,
+            )
 
     def _is_activity_different(self, new_activity: dict) -> bool:
         """Check if the new activity is different from current.
@@ -154,11 +210,15 @@ class ActivityTracker:
             new_activity['window_title'] != self._current_activity['window_title']
         )
 
-    def _save_current_activity(self, is_idle: bool = False) -> None:
+    def _save_current_activity(
+        self, is_idle: bool = False, end_time: Optional[datetime] = None
+    ) -> None:
         """Save the current activity to database.
 
         Args:
             is_idle: Whether this activity should be marked as idle time
+            end_time: Optional explicit end (defaults to now); used to
+                cut the activity at the moment the user went idle
 
         Note:
             Must be called with _activity_lock held.
@@ -166,7 +226,8 @@ class ActivityTracker:
         if not self._current_activity or not self._start_time:
             return
 
-        end_time = datetime.now()
+        if end_time is None:
+            end_time = datetime.now()
 
         # Only save if duration is at least 1 second
         if (end_time - self._start_time).total_seconds() >= 1:
@@ -179,16 +240,32 @@ class ActivityTracker:
                 process_path=self._current_activity.get('process_path')
             )
 
-            # Auto-assign to Social Media project if detected
-            if activity_id and SocialMediaDetector.is_social_media(
-                self._current_activity['app_name'],
-                self._current_activity['window_title']
-            ):
-                social_media_project_id = self.database.get_social_media_project_id()
-                if social_media_project_id:
-                    self.database.assign_activity_to_project(
-                        activity_id, social_media_project_id
-                    )
+            if activity_id and not is_idle:
+                self._auto_assign_project(
+                    activity_id,
+                    self._current_activity['app_name'],
+                    self._current_activity['window_title'],
+                )
+
+    def _auto_assign_project(
+        self, activity_id: int, app_name: str, window_title: str
+    ) -> None:
+        """Assign a freshly saved activity via rules or social media detection.
+
+        Deterministic user rules take precedence over the built-in
+        social media detector.
+        """
+        project_id = self.rules_engine.match(app_name, window_title)
+
+        if project_id is None and SocialMediaDetector.is_social_media(
+            app_name, window_title
+        ):
+            project_id = self.database.get_social_media_project_id()
+
+        if project_id is not None:
+            self.database.assign_activity_to_project(
+                activity_id, project_id, update_last_used=False
+            )
 
     def get_current_activity(self) -> Optional[dict]:
         """Get the current activity being tracked (thread-safe).

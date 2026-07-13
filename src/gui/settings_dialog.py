@@ -1,10 +1,11 @@
 import os
 from pathlib import Path
+from typing import Optional
 
-from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QDialog,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -19,15 +20,24 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from utils.config import DEFAULT_IGNORED_PROCESSES, DEFAULT_IGNORED_WINDOW_TITLES
+from core.database_protocol import DatabaseProtocol
+from utils.config import (
+    DEFAULT_IGNORED_PROCESSES,
+    DEFAULT_IGNORED_WINDOW_TITLES,
+    get_env_int,
+    get_user_env_path,
+)
 from .theme import ThemeMode, get_theme
+
+DAILY_GOAL_SETTING_KEY = 'daily_goal_hours'
 
 
 class SettingsDialog(QDialog):
     """Dialog for application settings"""
 
-    def __init__(self, parent=None):
+    def __init__(self, database: Optional[DatabaseProtocol] = None, parent=None):
         super().__init__(parent)
+        self.database = database
         self.theme_manager = get_theme()
         self.setup_ui()
         self.load_settings()
@@ -35,7 +45,7 @@ class SettingsDialog(QDialog):
     def setup_ui(self):
         """Setup the user interface"""
         self.setWindowTitle("Einstellungen")
-        self.setGeometry(200, 200, 550, 550)
+        self.setGeometry(200, 200, 550, 620)
 
         layout = QVBoxLayout(self)
 
@@ -50,30 +60,54 @@ class SettingsDialog(QDialog):
 
         self.theme_group = QButtonGroup(self)
 
-        self.light_radio = QRadioButton("☀️ Hell")
-        self.light_radio.setToolTip("Helles Design für Tageslicht")
-        self.theme_group.addButton(self.light_radio, 0)
+        self.system_radio = QRadioButton("Automatisch (System)")
+        self.system_radio.setToolTip("Folgt der Windows-Einstellung")
+        self.theme_group.addButton(self.system_radio, 0)
+        theme_row.addWidget(self.system_radio)
+
+        self.light_radio = QRadioButton("Hell")
+        self.light_radio.setToolTip("Helles Design")
+        self.theme_group.addButton(self.light_radio, 1)
         theme_row.addWidget(self.light_radio)
 
-        self.dark_radio = QRadioButton("🌙 Dunkel")
-        self.dark_radio.setToolTip("Dunkles Design für Nachtarbeit")
-        self.theme_group.addButton(self.dark_radio, 1)
+        self.dark_radio = QRadioButton("Dunkel")
+        self.dark_radio.setToolTip("Dunkles Design")
+        self.theme_group.addButton(self.dark_radio, 2)
         theme_row.addWidget(self.dark_radio)
 
         theme_row.addStretch()
 
-        # Setze aktuelles Theme
-        if self.theme_manager.is_dark:
+        current_mode = self.theme_manager.current_theme
+        if current_mode == ThemeMode.SYSTEM:
+            self.system_radio.setChecked(True)
+        elif current_mode == ThemeMode.DARK:
             self.dark_radio.setChecked(True)
         else:
             self.light_radio.setChecked(True)
 
-        # Theme direkt anwenden bei Änderung
         self.theme_group.buttonClicked.connect(self.on_theme_changed)
 
         appearance_layout.addLayout(theme_row)
         appearance_group.setLayout(appearance_layout)
         layout.addWidget(appearance_group)
+
+        # Goals
+        goal_group = QGroupBox("Tagesziel")
+        goal_layout = QFormLayout()
+
+        self.daily_goal_spin = QDoubleSpinBox()
+        self.daily_goal_spin.setRange(0.0, 24.0)
+        self.daily_goal_spin.setSingleStep(0.5)
+        self.daily_goal_spin.setSuffix(" Stunden")
+        self.daily_goal_spin.setSpecialValueText("Deaktiviert")
+        self.daily_goal_spin.setToolTip(
+            "Sollarbeitszeit pro Tag. Wird im Tray-Tooltip angezeigt; "
+            "bei Erreichen erscheint eine Benachrichtigung. 0 = aus."
+        )
+        goal_layout.addRow("Aktive Zeit pro Tag:", self.daily_goal_spin)
+
+        goal_group.setLayout(goal_layout)
+        layout.addWidget(goal_group)
 
         # Database Settings
         db_group = QGroupBox("Datenbank")
@@ -144,7 +178,6 @@ class SettingsDialog(QDialog):
         blacklist_group = QGroupBox("Blacklist (Ignorierte Prozesse & Fenster)")
         blacklist_layout = QVBoxLayout()
 
-        # Ignored Processes
         processes_label = QLabel("Ignorierte Prozesse (einer pro Zeile):")
         blacklist_layout.addWidget(processes_label)
 
@@ -153,7 +186,6 @@ class SettingsDialog(QDialog):
         self.ignored_processes_text.setMaximumHeight(100)
         blacklist_layout.addWidget(self.ignored_processes_text)
 
-        # Ignored Window Titles
         titles_label = QLabel("Ignorierte Fenstertitel (einer pro Zeile):")
         blacklist_layout.addWidget(titles_label)
 
@@ -168,12 +200,9 @@ class SettingsDialog(QDialog):
         # Info section
         info_label = QLabel(
             "<b>Hinweise:</b><br>"
-            "• Minimum Aktivitätsdauer: Kürzere Aktivitäten werden als Rauschen gefiltert<br>"
-            "• Merge-Gap (App): Wechsel zur gleichen App werden zusammengefasst<br>"
-            "• Merge-Gap (Projekt): Noch aggressiveres Merging für Projekt-Aktivitäten<br>"
-            "• Blacklist: Prozesse und Fenstertitel, die nicht getrackt werden sollen<br>"
-            "• Änderungen werden beim Speichern in .env geschrieben<br>"
-            "• Datenbankpfad: Änderungen erfordern einen Neustart"
+            "• Einstellungen werden sofort wirksam und in "
+            f"{get_user_env_path()} gespeichert<br>"
+            "• Nur Änderungen am Datenbankpfad erfordern einen Neustart"
         )
         info_label.setWordWrap(True)
         layout.addWidget(info_label)
@@ -184,6 +213,7 @@ class SettingsDialog(QDialog):
         button_layout = QHBoxLayout()
 
         save_btn = QPushButton("Speichern")
+        save_btn.setProperty("class", "primary")
         save_btn.clicked.connect(self.save_settings)
         button_layout.addWidget(save_btn)
 
@@ -199,10 +229,12 @@ class SettingsDialog(QDialog):
 
     def on_theme_changed(self, button):
         """Handle theme change"""
-        if button == self.light_radio:
-            self.theme_manager.set_theme(ThemeMode.LIGHT)
-        else:
+        if button == self.system_radio:
+            self.theme_manager.set_theme(ThemeMode.SYSTEM)
+        elif button == self.dark_radio:
             self.theme_manager.set_theme(ThemeMode.DARK)
+        else:
+            self.theme_manager.set_theme(ThemeMode.LIGHT)
 
     def browse_database_path(self):
         """Open file dialog to select database path"""
@@ -225,20 +257,25 @@ class SettingsDialog(QDialog):
 
     def load_settings(self):
         """Load current settings from environment"""
-        # Load database path
         db_path = os.getenv('DATABASE_PATH', '')
         if db_path:
             self.db_path_edit.setText(db_path)
         else:
             self.db_path_edit.clear()
 
-        self.poll_interval_spin.setValue(int(os.getenv('POLL_INTERVAL', 2)))
-        self.idle_threshold_spin.setValue(int(os.getenv('IDLE_THRESHOLD', 300)))
-        self.min_duration_spin.setValue(int(os.getenv('MIN_ACTIVITY_DURATION', 10)))
-        self.merge_gap_spin.setValue(int(os.getenv('MERGE_GAP', 60)))
-        self.project_merge_gap_spin.setValue(int(os.getenv('PROJECT_MERGE_GAP', 180)))
+        self.poll_interval_spin.setValue(get_env_int('POLL_INTERVAL', 2))
+        self.idle_threshold_spin.setValue(get_env_int('IDLE_THRESHOLD', 300))
+        self.min_duration_spin.setValue(get_env_int('MIN_ACTIVITY_DURATION', 10))
+        self.merge_gap_spin.setValue(get_env_int('MERGE_GAP', 60))
+        self.project_merge_gap_spin.setValue(get_env_int('PROJECT_MERGE_GAP', 180))
 
-        # Load blacklist settings
+        if self.database:
+            goal = self.database.get_setting(DAILY_GOAL_SETTING_KEY, '0')
+            try:
+                self.daily_goal_spin.setValue(float(goal))
+            except (TypeError, ValueError):
+                self.daily_goal_spin.setValue(0.0)
+
         ignored_procs = os.getenv('IGNORED_PROCESSES', '')
         if ignored_procs.strip():
             self.ignored_processes_text.setPlainText('\n'.join(p.strip() for p in ignored_procs.split(',') if p.strip()))
@@ -258,25 +295,22 @@ class SettingsDialog(QDialog):
         self.min_duration_spin.setValue(10)
         self.merge_gap_spin.setValue(60)
         self.project_merge_gap_spin.setValue(180)
+        self.daily_goal_spin.setValue(0.0)
         self.ignored_processes_text.setPlainText('\n'.join(sorted(DEFAULT_IGNORED_PROCESSES)))
         self.ignored_titles_text.setPlainText('\n'.join(sorted(DEFAULT_IGNORED_WINDOW_TITLES)))
 
     def save_settings(self):
-        """Save settings to .env file"""
+        """Save settings to the user env file and the running process."""
         try:
-            # Read current .env file (use project root, not CWD)
-            env_path = str(Path(__file__).resolve().parent.parent.parent / '.env')
+            env_path = get_user_env_path()
             env_lines = []
 
-            if os.path.exists(env_path):
-                with open(env_path, encoding='utf-8') as f:
-                    env_lines = f.readlines()
+            if env_path.exists():
+                env_lines = env_path.read_text(encoding='utf-8').splitlines(keepends=True)
 
-            # Parse blacklist entries
             ignored_processes = [p.strip() for p in self.ignored_processes_text.toPlainText().split('\n') if p.strip()]
             ignored_titles = [t.strip() for t in self.ignored_titles_text.toPlainText().split('\n') if t.strip()]
 
-            # Update or add settings
             settings = {
                 'DATABASE_PATH': self.db_path_edit.text().strip(),
                 'POLL_INTERVAL': str(self.poll_interval_spin.value()),
@@ -304,21 +338,21 @@ class SettingsDialog(QDialog):
                 else:
                     new_lines.append(line)
 
-            # Add new settings that weren't in the file
             for key, value in settings.items():
                 if key not in updated_keys:
                     new_lines.append(f"{key}={value}\n")
 
-            # Write back to file
-            with open(env_path, 'w', encoding='utf-8') as f:
-                f.writelines(new_lines)
+            env_path.write_text(''.join(new_lines), encoding='utf-8')
 
-            QMessageBox.information(
-                self,
-                "Einstellungen gespeichert",
-                "Die Einstellungen wurden erfolgreich gespeichert.\n\n"
-                "Bitte starten Sie die Anwendung neu, damit alle Änderungen wirksam werden."
-            )
+            # Update the running process so changes apply without restart
+            # and the dialog shows current values when reopened
+            for key, value in settings.items():
+                os.environ[key] = value
+
+            if self.database:
+                self.database.set_setting(
+                    DAILY_GOAL_SETTING_KEY, str(self.daily_goal_spin.value())
+                )
 
             self.accept()
 

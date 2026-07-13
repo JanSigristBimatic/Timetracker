@@ -97,6 +97,21 @@ class Database:
             )
         ''')
 
+        # Assignment rules table (deterministic auto-assignment)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS project_rules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                field TEXT NOT NULL,
+                match_type TEXT NOT NULL DEFAULT 'contains',
+                pattern TEXT NOT NULL,
+                enabled BOOLEAN DEFAULT 1,
+                priority INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            )
+        ''')
+
         # Create indexes for better performance
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_activities_timestamp
@@ -148,22 +163,32 @@ class Database:
         end_time: datetime,
         is_idle: bool = False,
         process_path: Optional[str] = None,
+        prevent_overlap: bool = True,
     ) -> int:
-        """Save a tracked activity to the database"""
+        """Save a tracked activity to the database.
+
+        Args:
+            prevent_overlap: If True (default), existing activities that
+                overlap the new time range are shortened or removed.
+                Set to False for imports that may legitimately run in
+                parallel to tracked activities (e.g. calendar events).
+        """
         duration = int((end_time - start_time).total_seconds())
 
         with self._write_lock:
             cursor = self.conn.cursor()
             try:
-                # Check for overlapping activities
-                cursor.execute('''
-                    SELECT id, timestamp, duration
-                    FROM activities
-                    WHERE timestamp < ?
-                      AND datetime(timestamp, '+' || duration || ' seconds') > ?
-                ''', (end_time.strftime(_SQLITE_DT_FMT), start_time.strftime(_SQLITE_DT_FMT)))
+                overlapping = []
+                if prevent_overlap:
+                    # Check for overlapping activities
+                    cursor.execute('''
+                        SELECT id, timestamp, duration
+                        FROM activities
+                        WHERE timestamp < ?
+                          AND datetime(timestamp, '+' || duration || ' seconds') > ?
+                    ''', (end_time.strftime(_SQLITE_DT_FMT), start_time.strftime(_SQLITE_DT_FMT)))
 
-                overlapping = cursor.fetchall()
+                    overlapping = cursor.fetchall()
 
                 if overlapping:
                     # Shorten overlapping activities to prevent overlap
@@ -273,8 +298,29 @@ class Database:
 
         return projects
 
-    def assign_activity_to_project(self, activity_id: int, project_id: int) -> None:
-        """Assign an activity to a project"""
+    def _touch_project_last_used(self, cursor, project_id: Optional[int]) -> None:
+        """Update the last_used timestamp of a project.
+
+        Must be called with _write_lock held.
+        """
+        if project_id is None:
+            return
+
+        cursor.execute('''
+            UPDATE projects
+            SET last_used = ?
+            WHERE id = ?
+        ''', (datetime.now().strftime(_SQLITE_DT_FMT), project_id))
+
+    def assign_activity_to_project(
+        self, activity_id: int, project_id: Optional[int], update_last_used: bool = True
+    ) -> None:
+        """Assign an activity to a project (None clears the assignment).
+
+        Args:
+            update_last_used: Set False for automatic background
+                assignments that should not appear in "recently used".
+        """
         with self._write_lock:
             cursor = self.conn.cursor()
             cursor.execute('''
@@ -282,6 +328,9 @@ class Database:
                 SET project_id = ?
                 WHERE id = ?
             ''', (project_id, activity_id))
+
+            if update_last_used:
+                self._touch_project_last_used(cursor, project_id)
 
             self.conn.commit()
             cursor.close()
@@ -301,6 +350,7 @@ class Database:
             ''', [project_id] + activity_ids)
 
             rows_affected = cursor.rowcount
+            self._touch_project_last_used(cursor, project_id)
             self.conn.commit()
             cursor.close()
 
@@ -321,15 +371,7 @@ class Database:
             ''', (project_id, start_time.strftime(_SQLITE_DT_FMT), end_time.strftime(_SQLITE_DT_FMT), app_name))
 
             rows_affected = cursor.rowcount
-
-            # Update last_used timestamp for the project if it's not None
-            if project_id is not None:
-                cursor.execute('''
-                    UPDATE projects
-                    SET last_used = ?
-                    WHERE id = ?
-                ''', (datetime.now().strftime(_SQLITE_DT_FMT), project_id))
-
+            self._touch_project_last_used(cursor, project_id)
             self.conn.commit()
             cursor.close()
 
@@ -415,6 +457,158 @@ class Database:
             cursor.close()
 
         return rows_affected
+
+    def get_activities_in_timerange(
+        self, start_time: datetime, end_time: datetime, app_name: str
+    ) -> list[dict[str, Any]]:
+        """Get activities matched by the timerange operations.
+
+        Uses the same boundary semantics as assign/delete_by_timerange
+        (start inclusive, end exclusive) so callers can capture undo data.
+        """
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT * FROM activities
+            WHERE timestamp >= ?
+              AND timestamp < ?
+              AND app_name = ?
+        ''', (start_time.strftime(_SQLITE_DT_FMT), end_time.strftime(_SQLITE_DT_FMT), app_name))
+
+        activities = []
+        for row in cursor.fetchall():
+            activity = dict(row)
+            if isinstance(activity['timestamp'], str):
+                activity['timestamp'] = datetime.fromisoformat(activity['timestamp'])
+            activities.append(activity)
+
+        cursor.close()
+        return activities
+
+    def restore_activities(self, activities: list[dict[str, Any]]) -> int:
+        """Re-insert previously deleted activities (undo support).
+
+        Restores rows with their original IDs and project assignments.
+        """
+        if not activities:
+            return 0
+
+        with self._write_lock:
+            cursor = self.conn.cursor()
+            restored = 0
+
+            for activity in activities:
+                timestamp = activity['timestamp']
+                if isinstance(timestamp, datetime):
+                    timestamp = timestamp.strftime(_SQLITE_DT_FMT)
+
+                cursor.execute('''
+                    INSERT OR IGNORE INTO activities
+                        (id, timestamp, app_name, window_title, duration,
+                         category, project_id, is_idle, process_path)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    activity['id'],
+                    timestamp,
+                    activity['app_name'],
+                    activity.get('window_title'),
+                    activity['duration'],
+                    activity.get('category'),
+                    activity.get('project_id'),
+                    activity.get('is_idle', False),
+                    activity.get('process_path'),
+                ))
+                restored += cursor.rowcount
+
+            self.conn.commit()
+            cursor.close()
+
+        return restored
+
+    def get_total_duration(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        include_idle: bool = False,
+    ) -> int:
+        """Get the summed activity duration in seconds for a time range."""
+        cursor = self.conn.cursor()
+
+        query = '''
+            SELECT COALESCE(SUM(duration), 0) FROM activities
+            WHERE timestamp >= ? AND timestamp <= ?
+        '''
+        if not include_idle:
+            query += ' AND is_idle = 0'
+
+        cursor.execute(query, (
+            start_date.strftime(_SQLITE_DT_FMT), end_date.strftime(_SQLITE_DT_FMT)
+        ))
+        total = cursor.fetchone()[0]
+        cursor.close()
+
+        return int(total)
+
+    def create_project_rule(
+        self,
+        project_id: int,
+        field: str,
+        pattern: str,
+        match_type: str = 'contains',
+    ) -> int:
+        """Create an assignment rule.
+
+        Args:
+            project_id: Target project
+            field: 'app' or 'title'
+            pattern: Substring or regex to match
+            match_type: 'contains' or 'regex'
+        """
+        with self._write_lock:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                INSERT INTO project_rules (project_id, field, match_type, pattern)
+                VALUES (?, ?, ?, ?)
+            ''', (project_id, field, match_type, pattern))
+
+            rule_id = cursor.lastrowid
+            self.conn.commit()
+            cursor.close()
+
+        return int(rule_id) if rule_id else 0
+
+    def get_project_rules(self, enabled_only: bool = False) -> list[dict[str, Any]]:
+        """Get all assignment rules ordered by priority."""
+        cursor = self.conn.cursor()
+
+        query = 'SELECT * FROM project_rules'
+        if enabled_only:
+            query += ' WHERE enabled = 1'
+        query += ' ORDER BY priority, id'
+
+        cursor.execute(query)
+        rules = [dict(row) for row in cursor.fetchall()]
+        cursor.close()
+
+        return rules
+
+    def delete_project_rule(self, rule_id: int) -> None:
+        """Delete an assignment rule by ID."""
+        with self._write_lock:
+            cursor = self.conn.cursor()
+            cursor.execute('DELETE FROM project_rules WHERE id = ?', (rule_id,))
+            self.conn.commit()
+            cursor.close()
+
+    def set_project_rule_enabled(self, rule_id: int, enabled: bool) -> None:
+        """Enable or disable an assignment rule."""
+        with self._write_lock:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                'UPDATE project_rules SET enabled = ? WHERE id = ?',
+                (enabled, rule_id),
+            )
+            self.conn.commit()
+            cursor.close()
 
     def close(self) -> None:
         """Close database connection"""

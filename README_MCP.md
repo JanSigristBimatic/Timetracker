@@ -49,7 +49,7 @@ python mcp_server_demo.py
 ### 2. MCP Client Demo ausführen
 
 ```bash
-python mcp_demo.py
+python scripts/mcp_demo.py
 ```
 
 ## Verwendung im Code

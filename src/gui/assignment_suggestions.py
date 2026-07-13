@@ -2,6 +2,7 @@
 KI-Zuordnungs-Dialog für intelligente Projektzuordnung
 """
 
+import logging
 from datetime import datetime, timedelta
 
 from PyQt6.QtCore import Qt
@@ -21,6 +22,8 @@ from PyQt6.QtWidgets import (
 from core.database_protocol import DatabaseProtocol
 from utils.smart_project_assigner import SmartProjectAssigner
 from .theme import get_theme
+
+logger = logging.getLogger(__name__)
 
 
 class AssignmentSuggestionsDialog(QDialog):
@@ -67,6 +70,21 @@ class AssignmentSuggestionsDialog(QDialog):
         info.setProperty("class", "muted")
         layout.addWidget(info)
 
+        # Zeitraum-Auswahl
+        period_row = QHBoxLayout()
+        period_row.addWidget(QLabel("Zeitraum:"))
+
+        self.period_combo = QComboBox()
+        self.period_combo.addItem("Heute", 1)
+        self.period_combo.addItem("Letzte 7 Tage", 7)
+        self.period_combo.addItem("Letzte 30 Tage", 30)
+        self.period_combo.setCurrentIndex(1)
+        self.period_combo.currentIndexChanged.connect(self.load_suggestions)
+        period_row.addWidget(self.period_combo)
+        period_row.addStretch()
+
+        layout.addLayout(period_row)
+
         # Scroll Area für Vorschläge
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -105,16 +123,28 @@ class AssignmentSuggestionsDialog(QDialog):
 
     def load_suggestions(self):
         """Lade KI-Vorschläge"""
+        # Bestehende Einträge entfernen (bei Zeitraum-Wechsel)
+        while self.suggestions_layout.count():
+            child = self.suggestions_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        self.selected_suggestions.clear()
+        self.widget_map.clear()
+        self.last_clicked_index = None
+
         # Lade alle Projekte
         self.projects = self.database.get_projects()
 
-        # Hole Vorschläge für die letzten 7 Tage
+        days_back = self.period_combo.currentData() or 7
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=7)
+        start_date = end_date - timedelta(days=days_back)
 
         self.suggestions = self.assigner.get_suggestions_for_review(
             start_date=start_date, end_date=end_date, limit=100
         )
+
+        self.apply_btn.setEnabled(bool(self.suggestions))
 
         # Zeige Anzahl
         if not self.suggestions:
@@ -384,6 +414,6 @@ class AssignmentSuggestionsDialog(QDialog):
 
             self.database.assign_activity_to_project(activity_id, project_id)
 
-        print(f"✓ {len(self.selected_suggestions)} Aktivitäten zugeordnet")
+        logger.info(f"{len(self.selected_suggestions)} Aktivitäten zugeordnet")
 
         self.accept()
