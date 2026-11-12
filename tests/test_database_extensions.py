@@ -243,3 +243,16 @@ class TestSocialMediaRuleMigration:
         assert db.get_projects() == []
         assert db.get_project_rules() == []
         db.close()
+
+
+class TestUpdateProject:
+    def test_rename_and_recolor_keeps_assignments(self, db):
+        project_id = db.create_project("Alt", "#111111")
+        activity_id = db.save_activity("A.exe", "a", BASE, BASE + timedelta(minutes=5))
+        db.assign_activity_to_project(activity_id, project_id)
+
+        db.update_project(project_id, "Neu", "#222222")
+
+        project = next(p for p in db.get_projects() if p["id"] == project_id)
+        assert (project["name"], project["color"]) == ("Neu", "#222222")
+        assert db.get_activities()[0]["project_id"] == project_id

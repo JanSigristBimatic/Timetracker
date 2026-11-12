@@ -70,6 +70,17 @@ class DatabaseProtocol(Protocol):
         """
         ...
 
+    def update_project(self, project_id: int, name: str, color: str) -> None:
+        """
+        Rename and/or recolor a project
+
+        Args:
+            project_id: ID of the project
+            name: New unique project name
+            color: New project color (hex format)
+        """
+        ...
+
     def delete_project(self, project_id: int) -> None:
         """
         Delete a project by ID

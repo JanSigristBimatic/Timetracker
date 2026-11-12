@@ -326,13 +326,18 @@ class MainWindow(QMainWindow):
 
         return frame
 
+    def _delete_selected_in_day_view(self):
+        """Delete key only acts where the selection is visible"""
+        if self.current_view() == VIEW_DAY:
+            self.timeline.delete_selected()
+
     def setup_shortcuts(self):
         """Register keyboard shortcuts"""
         QShortcut(QKeySequence("Alt+Left"), self, self.previous_period)
         QShortcut(QKeySequence("Alt+Right"), self, self.next_period)
         QShortcut(QKeySequence("Ctrl+T"), self, self.go_to_today)
         QShortcut(QKeySequence("Ctrl+Z"), self, self.undo_last_action)
-        QShortcut(QKeySequence("Delete"), self, self.timeline.delete_selected)
+        QShortcut(QKeySequence("Delete"), self, self._delete_selected_in_day_view)
         QShortcut(QKeySequence("Ctrl+A"), self, self.timeline.select_all_visible)
         QShortcut(QKeySequence("Ctrl+E"), self, self.open_export_dialog)
         QShortcut(QKeySequence("Ctrl+N"), self, lambda: self.open_manual_entry())

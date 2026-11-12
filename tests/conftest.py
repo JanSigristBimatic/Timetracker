@@ -87,6 +87,12 @@ class MockDatabase(DatabaseProtocol):
 
         return project_id
 
+    def update_project(self, project_id: int, name: str, color: str) -> None:
+        """Rename and/or recolor a project"""
+        for project in self.projects:
+            if project["id"] == project_id:
+                project.update({"name": name, "color": color})
+
     def delete_project(self, project_id: int) -> None:
         """Delete a project by ID"""
         self.projects = [p for p in self.projects if p["id"] != project_id]

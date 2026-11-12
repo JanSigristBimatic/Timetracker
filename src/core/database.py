@@ -356,6 +356,17 @@ class Database:
 
         return int(project_id) if project_id else 0
 
+    def update_project(self, project_id: int, name: str, color: str) -> None:
+        """Rename and/or recolor a project"""
+        with self._write_lock:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                'UPDATE projects SET name = ?, color = ? WHERE id = ?',
+                (name, color, project_id),
+            )
+            self.conn.commit()
+            cursor.close()
+
     def delete_project(self, project_id: int) -> None:
         """Delete a project by ID"""
         with self._write_lock:
