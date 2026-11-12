@@ -324,3 +324,84 @@ class TestIdleHandling:
         activities = mock_db.get_activities()
         assert len(activities) == 1
         assert activities[0]["project_id"] == project_id
+
+
+class TestTimeIntegrity:
+    """Pauses, standby and background audio must never count as work"""
+
+    @pytest.fixture
+    def mock_platform_tracker(self):
+        mock = Mock()
+        mock.get_active_window.return_value = {
+            "app_name": "Code.exe",
+            "window_title": "main.py",
+            "process_path": r"C:\Code.exe",
+        }
+        mock.get_idle_time.return_value = 0
+        mock.is_audio_playing.return_value = False
+        return mock
+
+    def _make_tracker(self, mock_db, mock_platform_tracker):
+        with patch("core.tracker.ActivityTracker._get_platform_tracker") as mock_get:
+            mock_get.return_value = mock_platform_tracker
+            return ActivityTracker(mock_db, poll_interval=0.05, idle_threshold=60)
+
+    def test_stop_resets_state_so_pause_is_not_counted(
+        self, mock_db, mock_platform_tracker
+    ):
+        from datetime import timedelta
+
+        tracker = self._make_tracker(mock_db, mock_platform_tracker)
+        tracker.is_running = True
+        tracker._current_activity = {"app_name": "Code.exe", "window_title": "main.py"}
+        tracker._start_time = datetime.now() - timedelta(minutes=10)
+
+        tracker.stop()
+
+        assert tracker._current_activity is None
+        assert tracker._start_time is None
+        assert len(mock_db.get_activities()) == 1
+
+    def test_suspend_gap_closes_activity_at_last_poll(
+        self, mock_db, mock_platform_tracker
+    ):
+        from datetime import timedelta
+
+        tracker = self._make_tracker(mock_db, mock_platform_tracker)
+        last_poll = datetime.now() - timedelta(hours=8)
+        tracker._current_activity = {"app_name": "Code.exe", "window_title": "main.py"}
+        tracker._start_time = last_poll - timedelta(minutes=30)
+
+        tracker._handle_suspend_gap(last_poll, datetime.now())
+
+        saved = mock_db.get_activities()
+        assert len(saved) == 1
+        assert abs(saved[0]["duration"] - 1800) <= 1
+        assert tracker._idle_since == last_poll
+
+        with tracker._activity_lock:
+            tracker._exit_idle_state()
+        idle = [a for a in mock_db.get_activities() if a["is_idle"]]
+        assert len(idle) == 1
+        assert idle[0]["duration"] >= 8 * 3600 - 1
+
+    def test_short_poll_gap_is_not_a_suspend(self, mock_db, mock_platform_tracker):
+        from datetime import timedelta
+
+        tracker = self._make_tracker(mock_db, mock_platform_tracker)
+        tracker._current_activity = {"app_name": "Code.exe", "window_title": "main.py"}
+        tracker._start_time = datetime.now() - timedelta(minutes=5)
+        now = datetime.now()
+
+        tracker._handle_suspend_gap(now - timedelta(seconds=5), now)
+
+        assert mock_db.get_activities() == []
+        assert tracker._current_activity is not None
+
+    def test_audio_check_uses_foreground_app(self, mock_db, mock_platform_tracker):
+        tracker = self._make_tracker(mock_db, mock_platform_tracker)
+        tracker.start()
+        time.sleep(0.2)
+        tracker.stop()
+
+        mock_platform_tracker.is_audio_playing.assert_called_with("Code.exe")

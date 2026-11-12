@@ -114,26 +114,32 @@ class WindowsActivityTracker:
         return None
 
     @staticmethod
-    def is_audio_playing() -> bool:
-        """Check if any audio is currently playing on the system.
+    def is_audio_playing(app_name: Optional[str]) -> bool:
+        """Check if the given foreground application is playing audio.
 
-        Uses Windows Core Audio API via pycaw to detect active audio sessions.
+        Only audio from the foreground app counts as presence. Background
+        apps often keep an audio session active for hours (chat clients,
+        browser tabs), which would otherwise block idle detection.
+
+        Args:
+            app_name: Executable name of the foreground app, or None
 
         Returns:
-            True if audio is playing, False otherwise or on error.
+            True if that app has an active, audible session.
         """
+        if not app_name:
+            return False
+
         try:
             from pycaw.pycaw import AudioUtilities
 
-            sessions = AudioUtilities.GetAllSessions()
-            for session in sessions:
-                volume = session.SimpleAudioVolume
-                if session.Process and volume.GetMasterVolume() > 0:
-                    # Check if session state is active
-                    state = session.State
-                    # AudioSessionStateActive = 1
-                    if state == 1:
-                        return True
+            target = app_name.lower()
+            for session in AudioUtilities.GetAllSessions():
+                if not session.Process or session.Process.name().lower() != target:
+                    continue
+                # AudioSessionStateActive = 1
+                if session.State == 1 and session.SimpleAudioVolume.GetMasterVolume() > 0:
+                    return True
             return False
 
         except ImportError:
@@ -165,7 +171,10 @@ class WindowsActivityTracker:
                 logger.debug("GetLastInputInfo failed")
                 return 0.0
 
-            millis = ctypes.windll.kernel32.GetTickCount() - last_input_info.dwTime
+            # Both values are 32-bit tick counts that wrap after ~49.7 days
+            millis = (
+                ctypes.windll.kernel32.GetTickCount() - last_input_info.dwTime
+            ) & 0xFFFFFFFF
             return millis / 1000.0
 
         except OSError as e:
