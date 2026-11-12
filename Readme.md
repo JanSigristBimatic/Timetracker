@@ -218,12 +218,18 @@ Jan Sigrist
 
 ## Changelog
 
-### Version 0.3.0 (Aktuell)
-- Intelligente Projektzuweisung mit KI-gestützten Vorschlägen
+### Version 0.4.0 (Aktuell)
+- Korrekte Zeiten: Pausen, Standby und Audio aus Hintergrund-Apps zählen nicht mehr als Arbeit; Dauern werden gerundet statt abgeschnitten
+- Manuelle Einträge und Kalendertermine ersetzen die überdeckte PC-Zeit, angeschnittene Aktivitäten behalten ihren Rest
+- Social-Media-Erkennung als normale, editierbare Regeln
+- Zuordnungsvorschläge (vormals "KI-Zuordnung") mit Strg+Z rückgängig machbar
+- Projekte umbenennen und umfärben, Projekt-Auswertung, Regeln bearbeiten
+- Excel-Export mit Blatt "Tag x Projekt"
+- Entfernt: MCP-Client, Tagesrapport-Generator, ungenutzte Datenmodelle
+
+### Version 0.3.0
+- Intelligente Projektzuweisung mit Vorschlägen
 - Social Media Erkennung für Produktivitätsanalysen
-- Automatische Tagesberichtgenerierung
-- Verbesserte Datenmodelle (Activity, Project)
-- MCP Client Integration Beta
 - Dependency Injection mit Type Protocols für bessere Testbarkeit
 - Erweiterte Test-Suite
 
