@@ -171,7 +171,7 @@ class ExportDialog(QDialog):
                 QMessageBox.information(
                     self,
                     "Export erfolgreich",
-                    f"{count} Aktivitäten wurden in Excel-Format exportiert nach:\n{filepath}\n\nDas Excel enthält 3 Sheets:\n- Detailliert\n- Projekt-Zusammenfassung\n- Tages-Zusammenfassung"
+                    f"{count} Aktivitäten wurden in Excel-Format exportiert nach:\n{filepath}\n\nBlätter: Detailliert, Projekt-Zusammenfassung, Tag x Projekt, Tages-Zusammenfassung"
                 )
 
             self.accept()
