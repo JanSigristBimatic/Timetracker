@@ -1,6 +1,7 @@
 """Day statistics sidebar (time per project, app, and file)."""
 
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -174,7 +175,7 @@ class StatsSidebar(QFrame):
 
         if click_handler:
             name_label.setCursor(Qt.CursorShape.PointingHandCursor)
-            name_label.mousePressEvent = lambda event: click_handler()
+            name_label.mousePressEvent = lambda event: click_handler()  # pyright: ignore[reportAttributeAccessIssue]
         else:
             name_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 

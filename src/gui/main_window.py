@@ -1,5 +1,6 @@
 import logging
 from datetime import date, datetime, timedelta
+from typing import Optional
 
 from PyQt6.QtCore import QDate, QEvent, QSettings, Qt, QTimer
 from PyQt6.QtGui import QCursor, QFont, QFontMetrics, QKeySequence, QShortcut
@@ -414,7 +415,7 @@ class MainWindow(QMainWindow):
     def jump_to_day(self, day: date):
         """Switch to day view for the given date (from week/month view)"""
         self.set_view(VIEW_DAY)
-        self.date_edit.setDate(QDate(day))
+        self.date_edit.setDate(QDate(day.year, day.month, day.day))
 
     def previous_period(self):
         """Go one day/week/month back depending on the active view"""
@@ -616,7 +617,7 @@ class MainWindow(QMainWindow):
 
     def update_filter_options(self, all_activities: list[dict], projects: list[dict]):
         """Update filter dropdown options from already loaded day data"""
-        apps = sorted(set(a["app_name"] for a in all_activities))
+        apps = sorted({a["app_name"] for a in all_activities})
         current_app = self.app_filter.currentData()
 
         self.app_filter.blockSignals(True)
@@ -837,7 +838,7 @@ class MainWindow(QMainWindow):
         self.tracker.rules_engine.reload()
         self.load_current_view()
 
-    def open_manual_entry(self, start: datetime = None):
+    def open_manual_entry(self, start: Optional[datetime] = None):
         """Open manual entry dialog (button, Ctrl+N, or timeline double click)"""
         dialog = ManualEntryDialog(self.database, start=start, parent=self)
         if dialog.exec():

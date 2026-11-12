@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 
 from core.database_protocol import DatabaseProtocol
 from utils.smart_project_assigner import SmartProjectAssigner
+
 from .theme import get_theme
 
 logger = logging.getLogger(__name__)
@@ -269,7 +270,7 @@ class AssignmentSuggestionsDialog(QDialog):
             event.accept()  # Stoppt Event-Propagation
             QComboBox.mousePressEvent(project_combo, event)  # Führe normale ComboBox-Funktion aus
 
-        project_combo.mousePressEvent = combo_mouse_press
+        project_combo.mousePressEvent = combo_mouse_press  # pyright: ignore[reportAttributeAccessIssue]
 
         # Signal-Handler NACH dem Setzen des Standard-Index verbinden!
         # Dadurch wird der Handler nicht beim initialen Setzen aufgerufen
@@ -283,17 +284,17 @@ class AssignmentSuggestionsDialog(QDialog):
         layout.addLayout(project_row)
 
         # Speichere Checkbox-Referenz im Widget für Click-Handler
-        widget.checkbox = checkbox
-        widget.suggestion_index = index
+        widget.checkbox = checkbox  # pyright: ignore[reportAttributeAccessIssue]
+        widget.suggestion_index = index  # pyright: ignore[reportAttributeAccessIssue]
 
         # Mache das gesamte Widget klickbar
-        widget.mousePressEvent = lambda event: self.on_widget_clicked(widget, event)
+        widget.mousePressEvent = lambda event: self.on_widget_clicked(widget, event)  # pyright: ignore[reportAttributeAccessIssue]
 
         return widget
 
     def on_widget_clicked(self, widget: QWidget, event):
         """Handler für Widget-Klicks - togglet die Checkbox oder wählt Bereich bei Shift"""
-        index = widget.suggestion_index
+        index = widget.suggestion_index  # pyright: ignore[reportAttributeAccessIssue]
 
         # Prüfe auf Shift-Klick für Bereichsauswahl
         if event.modifiers() & Qt.KeyboardModifier.ShiftModifier and self.last_clicked_index is not None:
@@ -311,7 +312,7 @@ class AssignmentSuggestionsDialog(QDialog):
             self.update_button_text()
         else:
             # Normaler Klick: Toggle Checkbox
-            checkbox = widget.checkbox
+            checkbox = widget.checkbox  # pyright: ignore[reportAttributeAccessIssue]
             checkbox.setChecked(not checkbox.isChecked())
             self.last_clicked_index = index
 

@@ -5,7 +5,7 @@ Unterstützt Light und Dark Mode mit modernen UI-Verbesserungen
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict
+from typing import Optional
 
 from PyQt6.QtCore import QSettings, Qt
 from PyQt6.QtGui import QColor
@@ -190,7 +190,7 @@ class ThemeManager:
     _instance = None
     _current_theme: ThemeMode = ThemeMode.LIGHT
     _colors: ThemeColors = LIGHT_THEME
-    _settings: QSettings = None
+    _settings: Optional[QSettings] = None
     _system_watch_connected: bool = False
 
     def __new__(cls):
@@ -223,7 +223,7 @@ class ThemeManager:
     def _system_prefers_dark() -> bool:
         """Prüfe die System-Farbschema-Einstellung (Qt 6.5+)"""
         app = QApplication.instance()
-        if not app:
+        if not isinstance(app, QApplication):
             return False
         try:
             return app.styleHints().colorScheme() == Qt.ColorScheme.Dark
@@ -264,7 +264,7 @@ class ThemeManager:
         self._colors = self._resolve_colors()
 
         app = QApplication.instance()
-        if app:
+        if isinstance(app, QApplication):
             app.setStyleSheet(self.get_stylesheet())
             self._watch_system_scheme(app)
 
@@ -882,7 +882,7 @@ class ThemeManager:
         }}
         """
 
-    def get_timeline_colors(self) -> Dict[str, QColor]:
+    def get_timeline_colors(self) -> dict[str, QColor]:
         """Gibt die Timeline-Farben als QColor-Dict zurück"""
         c = self._colors
         return {

@@ -12,6 +12,7 @@ from core.database_protocol import DatabaseProtocol
 from utils.activity_merger import merge_activities
 from utils.config import get_env_int
 from utils.icon_cache import IconCache
+
 from .theme import contrasting_text_color, get_theme
 
 logger = logging.getLogger(__name__)
@@ -237,8 +238,13 @@ class TimelineWidget(QWidget):
 
             # If color already used, slightly shift hue for distinction
             if base_color in self.app_colors.values():
-                h, s, v, a = base_color.getHsv()
-                self.app_colors[app_name] = QColor.fromHsv((h + 20) % 360, s, v, a)
+                shifted = QColor(base_color)
+                shifted.setHsv(
+                    (base_color.hsvHue() + 20) % 360,
+                    base_color.hsvSaturation(),
+                    base_color.value(),
+                )
+                self.app_colors[app_name] = shifted
             else:
                 self.app_colors[app_name] = base_color
 
@@ -358,7 +364,7 @@ class TimelineWidget(QWidget):
 
     def mouseMoveEvent(self, event):
         """Handle mouse movement for tooltips, drag, and rubber band."""
-        if self._rubber_band.isVisible():
+        if self._rubber_band.isVisible() and self._rubber_origin is not None:
             self._rubber_band.setGeometry(
                 QRect(self._rubber_origin, event.pos()).normalized()
             )

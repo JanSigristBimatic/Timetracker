@@ -8,7 +8,7 @@ All-day events (VALUE=DATE), cancelled events, and recurring events
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -137,7 +137,7 @@ def _parse_ics_datetime(value: str, params: str) -> Optional[datetime]:
 
     if utc_flag == 'Z':
         # Convert UTC to local time, then drop tzinfo (DB stores naive local)
-        dt = dt.replace(tzinfo=timezone.utc).astimezone().replace(tzinfo=None)
+        dt = dt.replace(tzinfo=UTC).astimezone().replace(tzinfo=None)
 
     # TZID values are interpreted as local time - good enough for
     # single-timezone usage, documented limitation

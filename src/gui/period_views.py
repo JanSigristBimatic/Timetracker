@@ -8,7 +8,7 @@ switches back to the day view.
 import calendar
 import math
 from datetime import date, timedelta
-from typing import Any, Optional
+from typing import Any
 
 from PyQt6.QtCore import QRect, Qt, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QFont, QPainter, QPen

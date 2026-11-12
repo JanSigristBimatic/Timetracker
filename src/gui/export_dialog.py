@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QVBoxLayout,
+    QWidget,
 )
 
 from core.database_protocol import DatabaseProtocol
@@ -21,7 +22,7 @@ from utils.export import Exporter
 class ExportDialog(QDialog):
     """Dialog for exporting data"""
 
-    def __init__(self, database: DatabaseProtocol, parent: Optional[QDialog] = None):
+    def __init__(self, database: DatabaseProtocol, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.database = database
         self.exporter = Exporter(database)

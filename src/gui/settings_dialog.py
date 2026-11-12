@@ -27,6 +27,7 @@ from utils.config import (
     get_env_int,
     get_user_env_path,
 )
+
 from .theme import ThemeMode, get_theme
 
 DAILY_GOAL_SETTING_KEY = 'daily_goal_hours'
@@ -270,7 +271,7 @@ class SettingsDialog(QDialog):
         self.project_merge_gap_spin.setValue(get_env_int('PROJECT_MERGE_GAP', 180))
 
         if self.database:
-            goal = self.database.get_setting(DAILY_GOAL_SETTING_KEY, '0')
+            goal = self.database.get_setting(DAILY_GOAL_SETTING_KEY) or '0'
             try:
                 self.daily_goal_spin.setValue(float(goal))
             except (TypeError, ValueError):

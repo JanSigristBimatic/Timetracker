@@ -1,5 +1,4 @@
 import logging
-import os
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -160,7 +159,7 @@ class TimeTrackerApp:
     def _daily_goal_hours(self) -> float:
         """Configured daily goal in hours (0 = disabled)"""
         try:
-            return float(self.database.get_setting(DAILY_GOAL_SETTING_KEY, '0'))
+            return float(self.database.get_setting(DAILY_GOAL_SETTING_KEY) or '0')
         except (TypeError, ValueError):
             return 0.0
 

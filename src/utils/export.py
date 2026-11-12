@@ -81,7 +81,7 @@ def activity_rows(
             'Dauer (Minuten)': round(activity['duration'] / 60, 2),
             'Programm': activity['app_name'],
             'Fenster-Titel': activity.get('window_title') or '',
-            'Projekt': project_names.get(activity.get('project_id'), ''),
+            'Projekt': _assigned_project_name(activity, project_names),
             'Idle': 'Ja' if activity.get('is_idle') else 'Nein',
         })
     return rows
@@ -143,6 +143,11 @@ def daily_summary_rows(activities: list[dict[str, Any]]) -> list[dict[str, Any]]
         }
         for day, stats in sorted(days.items())
     ]
+
+
+def _assigned_project_name(activity: dict[str, Any], project_names: dict[int, str]) -> str:
+    project_id = activity.get('project_id')
+    return project_names.get(project_id, '') if project_id is not None else ''
 
 
 def _project_label(project_id: Any, project_names: dict[int, str]) -> str:

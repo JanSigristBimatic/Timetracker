@@ -1,7 +1,7 @@
 """Dialog for importing calendar events from an ICS file."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 from PyQt6.QtCore import QDate, Qt

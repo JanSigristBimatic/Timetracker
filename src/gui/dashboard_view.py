@@ -29,7 +29,8 @@ from utils.project_stats import (
     compute_kpis,
     top_details_for_project,
 )
-from .theme import contrasting_text_color, get_theme
+
+from .theme import get_theme
 
 UNASSIGNED_COLOR = "#95a5a6"
 UNASSIGNED_LABEL = "Ohne Projekt"

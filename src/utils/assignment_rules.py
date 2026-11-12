@@ -48,7 +48,7 @@ class AssignmentRulesEngine:
 
         title = window_title or ''
 
-        for rule in self._rules:
+        for rule in self._rules or []:
             value = app_name if rule['field'] == FIELD_APP else title
             if rule_matches(rule, value):
                 return rule['project_id']

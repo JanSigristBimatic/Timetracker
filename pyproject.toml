@@ -7,13 +7,16 @@ exclude = [
     "dist"
 ]
 typeCheckingMode = "basic"
-pythonVersion = "3.9"
+pythonVersion = "3.12"
 reportMissingImports = true
 reportMissingTypeStubs = false
+# PyQt6 stubs mark nearly every getter as Optional (item(), viewport(),
+# horizontalHeader(), ...); those widgets always exist here.
+reportOptionalMemberAccess = false
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = [
@@ -28,6 +31,8 @@ select = [
 ]
 ignore = [
     "E501",  # line too long (handled by formatter)
+    "N802",  # Qt event overrides must keep camelCase names (paintEvent, ...)
+    "UP045", # Optional[X] is used consistently across the code base
 ]
 
 [tool.ruff.format]

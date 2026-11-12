@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QVBoxLayout,
+    QWidget,
 )
 
 from core.database_protocol import DatabaseProtocol
@@ -24,7 +25,7 @@ DEFAULT_COLOR = QColor(52, 152, 219)
 class ProjectManagerDialog(QDialog):
     """Dialog for managing projects"""
 
-    def __init__(self, database: DatabaseProtocol, parent: Optional[QDialog] = None):
+    def __init__(self, database: DatabaseProtocol, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.database = database
         self.setup_ui()

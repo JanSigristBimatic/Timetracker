@@ -144,7 +144,7 @@ class IconCache:
 
             if hdc:
                 try:
-                    hdc.DetachDC()
+                    hdc.DetachDC()  # pyright: ignore[reportAttributeAccessIssue]
                 except (OSError, AttributeError):
                     pass
 

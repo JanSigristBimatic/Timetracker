@@ -2,12 +2,14 @@
 
 import json
 import logging
+from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Callable, Optional
+from typing import Optional
 
 from PyQt6.QtWidgets import QWidget
 
 from core.database_protocol import DatabaseProtocol
+
 from .theme import get_theme
 
 logger = logging.getLogger(__name__)
