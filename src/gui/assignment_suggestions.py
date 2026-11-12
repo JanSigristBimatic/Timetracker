@@ -1,9 +1,10 @@
 """
-KI-Zuordnungs-Dialog für intelligente Projektzuordnung
+Dialog for reviewing project suggestions learned from past assignments
 """
 
 import logging
 from datetime import datetime, timedelta
+from typing import Optional
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
@@ -27,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 class AssignmentSuggestionsDialog(QDialog):
-    """Dialog zur Anzeige und Bestätigung von KI-Projektzuordnungen"""
+    """Review and apply project suggestions derived from assignment history"""
 
     def __init__(self, database: DatabaseProtocol, parent=None):
         super().__init__(parent)
@@ -38,6 +39,7 @@ class AssignmentSuggestionsDialog(QDialog):
         self.projects = []  # Alle verfügbaren Projekte
         self.widget_map = {}  # Map: index -> widget für Style-Updates
         self.last_clicked_index = None  # Für Shift-Klick Bereichsauswahl
+        self.applied_changes: list[tuple[int, Optional[int]]] = []  # For undo
         self.theme = get_theme()
 
         self.setup_ui()
@@ -45,13 +47,13 @@ class AssignmentSuggestionsDialog(QDialog):
 
     def setup_ui(self):
         """Setup Dialog UI"""
-        self.setWindowTitle("🤖 KI-Projektzuordnung")
+        self.setWindowTitle("Zuordnungsvorschläge")
         self.setMinimumSize(900, 600)
 
         layout = QVBoxLayout(self)
 
         # Header
-        header = QLabel("Intelligente Projektzuordnung")
+        header = QLabel("Zuordnungsvorschläge")
         header_font = QFont()
         header_font.setPointSize(14)
         header_font.setBold(True)
@@ -60,11 +62,10 @@ class AssignmentSuggestionsDialog(QDialog):
 
         # Info Text
         info = QLabel(
-            "Die KI hat aus Ihren bisherigen Zuordnungen gelernt und schlägt "
-            "automatisch Projekte für nicht zugeordnete Aktivitäten vor. "
-            "Wählen Sie die Vorschläge aus, die Sie übernehmen möchten.\n"
-            "💡 Tipp: Halten Sie Shift gedrückt und klicken Sie auf zwei Karten, "
-            "um einen Bereich auszuwählen."
+            "Vorschläge basieren auf deinen bisherigen Zuordnungen (welches Programm "
+            "und welche Begriffe im Fenstertitel zu welchem Projekt gehörten). "
+            "Übernommene Vorschläge lassen sich mit Strg+Z rückgängig machen.\n"
+            "Tipp: Shift gedrückt halten und zwei Karten anklicken wählt einen Bereich."
         )
         info.setWordWrap(True)
         info.setProperty("class", "muted")
@@ -122,7 +123,7 @@ class AssignmentSuggestionsDialog(QDialog):
         layout.addLayout(button_layout)
 
     def load_suggestions(self):
-        """Lade KI-Vorschläge"""
+        """Load suggestions for the selected period"""
         # Bestehende Einträge entfernen (bei Zeitraum-Wechsel)
         while self.suggestions_layout.count():
             child = self.suggestions_layout.takeAt(0)
@@ -406,13 +407,13 @@ class AssignmentSuggestionsDialog(QDialog):
         if not self.selected_suggestions:
             return
 
-        # Wende Zuordnungen an
         for index in self.selected_suggestions:
             suggestion = self.suggestions[index]
-            activity_id = suggestion["activity"]["id"]
-            project_id = suggestion["suggested_project_id"]
-
-            self.database.assign_activity_to_project(activity_id, project_id)
+            activity = suggestion["activity"]
+            self.applied_changes.append((activity["id"], activity.get("project_id")))
+            self.database.assign_activity_to_project(
+                activity["id"], suggestion["suggested_project_id"]
+            )
 
         logger.info(f"{len(self.selected_suggestions)} Aktivitäten zugeordnet")
 

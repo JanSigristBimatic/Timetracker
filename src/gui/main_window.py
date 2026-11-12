@@ -26,6 +26,7 @@ from utils.config import get_env_int
 from utils.icon_cache import IconCache
 from utils.window_title_parser import extract_filename_from_title
 
+from .assignment_suggestions import AssignmentSuggestionsDialog
 from .calendar_import_dialog import CalendarImportDialog
 from .dashboard_view import DashboardView
 from .export_dialog import ExportDialog
@@ -239,10 +240,13 @@ class MainWindow(QMainWindow):
         rules_btn.clicked.connect(self.open_rules_dialog)
         layout.addWidget(rules_btn)
 
-        ai_assign_btn = QPushButton("KI-Zuordnung")
-        ai_assign_btn.clicked.connect(self.open_ai_assignment)
-        ai_assign_btn.setProperty("class", "primary")
-        layout.addWidget(ai_assign_btn)
+        suggestions_btn = QPushButton("Vorschläge")
+        suggestions_btn.setToolTip(
+            "Projektvorschläge aus bisherigen Zuordnungen prüfen und übernehmen"
+        )
+        suggestions_btn.clicked.connect(self.open_assignment_suggestions)
+        suggestions_btn.setProperty("class", "primary")
+        layout.addWidget(suggestions_btn)
 
         import_btn = QPushButton("Import")
         import_btn.setToolTip("Kalender-Termine aus ICS-Datei importieren")
@@ -858,10 +862,10 @@ class MainWindow(QMainWindow):
         self.tracker.idle_threshold = get_env_int('IDLE_THRESHOLD', 300)
         self.timeline.reload_settings()
 
-    def open_ai_assignment(self):
-        """Open AI assignment dialog"""
-        from .assignment_suggestions import AssignmentSuggestionsDialog
-
+    def open_assignment_suggestions(self):
+        """Open the suggestions dialog; applied suggestions are undoable"""
         dialog = AssignmentSuggestionsDialog(self.database, self)
         if dialog.exec():
+            if dialog.applied_changes:
+                self.push_undo({'type': 'assign', 'changes': dialog.applied_changes})
             self.load_current_view()

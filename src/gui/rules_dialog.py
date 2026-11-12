@@ -59,7 +59,7 @@ class RulesDialog(QDialog):
         info = QLabel(
             "Regeln ordnen neue Aktivitäten automatisch einem Projekt zu. "
             "Die erste zutreffende Regel gewinnt. Regeln haben Vorrang vor "
-            "der KI-Zuordnung. Doppelklick auf eine Regel öffnet sie zum "
+            "den Zuordnungsvorschlägen. Doppelklick auf eine Regel öffnet sie zum "
             "Bearbeiten."
         )
         info.setWordWrap(True)
