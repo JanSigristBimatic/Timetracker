@@ -283,6 +283,26 @@ class DatabaseProtocol(Protocol):
         """
         ...
 
+    def update_project_rule(
+        self,
+        rule_id: int,
+        project_id: int,
+        field: str,
+        pattern: str,
+        match_type: str,
+    ) -> None:
+        """
+        Update an existing assignment rule
+
+        Args:
+            rule_id: ID of the rule to update
+            project_id: New target project
+            field: 'app' or 'title'
+            pattern: New pattern
+            match_type: 'contains' or 'regex'
+        """
+        ...
+
     def delete_project_rule(self, rule_id: int) -> None:
         """
         Delete an assignment rule by ID

@@ -46,6 +46,19 @@ class TestProjectRules:
         db.delete_project_rule(rule_id)
         assert all(r["id"] != rule_id for r in db.get_project_rules())
 
+    def test_update_rule(self, db):
+        project_a = db.create_project("A")
+        project_b = db.create_project("B")
+        rule_id = db.create_project_rule(project_a, "title", "alt")
+
+        db.update_project_rule(rule_id, project_b, "app", "neu.exe", "regex")
+
+        rule = next(r for r in db.get_project_rules() if r["id"] == rule_id)
+        assert rule["project_id"] == project_b
+        assert rule["field"] == "app"
+        assert rule["pattern"] == "neu.exe"
+        assert rule["match_type"] == "regex"
+
     def test_rules_deleted_with_project(self, db):
         project_id = db.create_project("Temp")
         db.create_project_rule(project_id, "title", "x")

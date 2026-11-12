@@ -244,6 +244,25 @@ class MockDatabase(DatabaseProtocol):
             key=lambda r: (r["priority"], r["id"]),
         )
 
+    def update_project_rule(
+        self,
+        rule_id: int,
+        project_id: int,
+        field: str,
+        pattern: str,
+        match_type: str,
+    ) -> None:
+        """Update an existing assignment rule"""
+        for rule in self.project_rules:
+            if rule["id"] == rule_id:
+                rule.update({
+                    "project_id": project_id,
+                    "field": field,
+                    "pattern": pattern,
+                    "match_type": match_type,
+                })
+                break
+
     def delete_project_rule(self, rule_id: int) -> None:
         """Delete an assignment rule by ID"""
         self.project_rules = [r for r in self.project_rules if r["id"] != rule_id]

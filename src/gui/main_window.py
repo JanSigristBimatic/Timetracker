@@ -27,6 +27,7 @@ from utils.icon_cache import IconCache
 from utils.window_title_parser import extract_filename_from_title
 
 from .calendar_import_dialog import CalendarImportDialog
+from .dashboard_view import DashboardView
 from .export_dialog import ExportDialog
 from .manual_entry_dialog import ManualEntryDialog
 from .period_views import MonthView, WeekView
@@ -42,6 +43,7 @@ logger = logging.getLogger(__name__)
 VIEW_DAY = 0
 VIEW_WEEK = 1
 VIEW_MONTH = 2
+VIEW_DASHBOARD = 3
 
 MAX_UNDO_STEPS = 20
 ZOOM_MIN = 30
@@ -125,6 +127,9 @@ class MainWindow(QMainWindow):
         self.month_view.day_clicked.connect(self.jump_to_day)
         self.view_stack.addWidget(self.month_view)
 
+        self.dashboard_view = DashboardView(self.database)
+        self.view_stack.addWidget(self.dashboard_view)
+
         layout.addWidget(self.view_stack, stretch=1)
 
         # Filter bar (day view only)
@@ -163,10 +168,10 @@ class MainWindow(QMainWindow):
         self.next_btn.clicked.connect(self.next_period)
         layout.addWidget(self.next_btn)
 
-        today_btn = QPushButton("Heute")
-        today_btn.setToolTip("Zum heutigen Tag (Strg+T)")
-        today_btn.clicked.connect(self.go_to_today)
-        layout.addWidget(today_btn)
+        self.today_btn = QPushButton("Heute")
+        self.today_btn.setToolTip("Zum heutigen Tag (Strg+T)")
+        self.today_btn.clicked.connect(self.go_to_today)
+        layout.addWidget(self.today_btn)
 
         layout.addSpacing(12)
 
@@ -176,6 +181,7 @@ class MainWindow(QMainWindow):
             (VIEW_DAY, "Tag", "Tagesansicht (Strg+1)"),
             (VIEW_WEEK, "Woche", "Wochenansicht (Strg+2)"),
             (VIEW_MONTH, "Monat", "Monatsansicht (Strg+3)"),
+            (VIEW_DASHBOARD, "Auswertung", "Projekt-Auswertung (Strg+4)"),
         ):
             btn = QPushButton(label)
             btn.setCheckable(True)
@@ -329,6 +335,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+1"), self, lambda: self.set_view(VIEW_DAY))
         QShortcut(QKeySequence("Ctrl+2"), self, lambda: self.set_view(VIEW_WEEK))
         QShortcut(QKeySequence("Ctrl+3"), self, lambda: self.set_view(VIEW_MONTH))
+        QShortcut(QKeySequence("Ctrl+4"), self, lambda: self.set_view(VIEW_DASHBOARD))
         QShortcut(QKeySequence("F5"), self, self.load_current_view)
 
     # ------------------------------------------------------------------
@@ -378,13 +385,20 @@ class MainWindow(QMainWindow):
         self.switch_view(index)
 
     def switch_view(self, index: int):
-        """Switch between day, week, and month view"""
+        """Switch between day, week, month, and dashboard view"""
         self.view_stack.setCurrentIndex(index)
 
         is_day = index == VIEW_DAY
         self.zoom_widget.setVisible(is_day)
         self.filter_bar.setVisible(is_day)
         self.recent_projects_bar.setVisible(is_day)
+
+        # The dashboard has its own period selector
+        has_date_nav = index != VIEW_DASHBOARD
+        self.prev_btn.setVisible(has_date_nav)
+        self.date_edit.setVisible(has_date_nav)
+        self.next_btn.setVisible(has_date_nav)
+        self.today_btn.setVisible(has_date_nav)
 
         self.load_current_view()
 
@@ -405,6 +419,8 @@ class MainWindow(QMainWindow):
         current = self.date_edit.date()
         view = self.current_view()
 
+        if view == VIEW_DASHBOARD:
+            return  # Dashboard uses its own period selector
         if view == VIEW_WEEK:
             self.date_edit.setDate(current.addDays(7 * direction))
         elif view == VIEW_MONTH:
@@ -437,6 +453,9 @@ class MainWindow(QMainWindow):
             self.load_week_view()
         elif view == VIEW_MONTH:
             self.load_month_view()
+        elif view == VIEW_DASHBOARD:
+            self.dashboard_view.refresh()
+            self.stats_label.setText("")
         else:
             self.load_day_view()
 

@@ -591,6 +591,25 @@ class Database:
 
         return rules
 
+    def update_project_rule(
+        self,
+        rule_id: int,
+        project_id: int,
+        field: str,
+        pattern: str,
+        match_type: str,
+    ) -> None:
+        """Update an existing assignment rule."""
+        with self._write_lock:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                UPDATE project_rules
+                SET project_id = ?, field = ?, pattern = ?, match_type = ?
+                WHERE id = ?
+            ''', (project_id, field, pattern, match_type, rule_id))
+            self.conn.commit()
+            cursor.close()
+
     def delete_project_rule(self, rule_id: int) -> None:
         """Delete an assignment rule by ID."""
         with self._write_lock:
