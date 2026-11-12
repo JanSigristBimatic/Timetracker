@@ -34,13 +34,12 @@ class MockDatabase(DatabaseProtocol):
         end_time: datetime,
         is_idle: bool = False,
         process_path: str | None = None,
-        prevent_overlap: bool = True,
     ) -> int:
         """Save activity and return ID"""
         activity_id = self._activity_id_counter
         self._activity_id_counter += 1
 
-        duration = int((end_time - start_time).total_seconds())
+        duration = round((end_time - start_time).total_seconds())
 
         self.activities.append({
             "id": activity_id,

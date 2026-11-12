@@ -163,19 +163,42 @@ class TestTotalsAndLastUsed:
         assert all(p["id"] != project_id for p in recent)
 
 
-class TestPreventOverlapFlag:
-    def test_overlap_prevention_disabled(self, db):
-        db.save_activity("Code.exe", "work", BASE, BASE + timedelta(hours=2))
+class TestOverlapSplitting:
+    def test_entry_inside_activity_splits_it(self, db):
+        project_id = db.create_project("P")
+        code_id = db.save_activity("Code.exe", "work", BASE, BASE + timedelta(hours=2))
+        db.assign_activity_to_project(code_id, project_id)
 
-        # Calendar import overlapping tracked time must not shorten it
         db.save_activity(
             "Kalender", "Meeting",
             BASE + timedelta(minutes=30),
             BASE + timedelta(minutes=90),
-            prevent_overlap=False,
         )
 
-        activities = db.get_activities()
-        code = next(a for a in activities if a["app_name"] == "Code.exe")
-        assert code["duration"] == 2 * 3600  # untouched
-        assert len(activities) == 2
+        activities = sorted(db.get_activities(), key=lambda a: a["timestamp"])
+        assert [a["app_name"] for a in activities] == ["Code.exe", "Kalender", "Code.exe"]
+        assert [a["duration"] for a in activities] == [1800, 3600, 1800]
+        assert activities[2]["timestamp"] == BASE + timedelta(minutes=90)
+        assert activities[2]["project_id"] == project_id
+        assert sum(a["duration"] for a in activities) == 2 * 3600
+
+    def test_entry_covering_start_moves_activity(self, db):
+        db.save_activity("Code.exe", "work", BASE + timedelta(minutes=30), BASE + timedelta(hours=2))
+
+        db.save_activity("Manuell", "x", BASE, BASE + timedelta(hours=1))
+
+        code = next(a for a in db.get_activities() if a["app_name"] == "Code.exe")
+        assert code["timestamp"] == BASE + timedelta(hours=1)
+        assert code["duration"] == 3600
+
+    def test_subsecond_rounding_overlap_is_ignored(self, db):
+        first_end = BASE + timedelta(seconds=10, milliseconds=600)
+        db.save_activity("A.exe", "a", BASE, first_end)  # stored as 11 s
+        db.save_activity("B.exe", "b", first_end, first_end + timedelta(seconds=5))
+
+        a = next(x for x in db.get_activities() if x["app_name"] == "A.exe")
+        assert a["duration"] == 11
+
+    def test_duration_is_rounded_not_truncated(self, db):
+        db.save_activity("A.exe", "a", BASE, BASE + timedelta(seconds=4, milliseconds=900))
+        assert db.get_activities()[0]["duration"] == 5

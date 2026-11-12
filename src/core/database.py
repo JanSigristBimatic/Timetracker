@@ -1,13 +1,33 @@
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
 from typing import Any, Optional
 
-
 # SQLite-compatible datetime format (space separator, not 'T', with microseconds)
 _SQLITE_DT_FMT = '%Y-%m-%d %H:%M:%S.%f'
+
+# Durations are stored as whole seconds; rounding lets neighbours overlap
+# by up to half a second, which must not count as a real overlap.
+OVERLAP_TOLERANCE_SECONDS = 0.5
+
+# Lower bound for the overlap search so it can use the timestamp index.
+# No single activity lasts longer than this.
+OVERLAP_LOOKBACK = timedelta(days=7)
+
+
+def _seconds_between(start: datetime, end: datetime) -> int:
+    """Whole seconds between two datetimes, rounded (never truncated).
+
+    Truncating would lose half a second per activity on average, which
+    adds up to minutes per day with hundreds of window switches.
+    """
+    return max(0, round((end - start).total_seconds()))
+
+
+def _as_datetime(value: Any) -> datetime:
+    return datetime.fromisoformat(value) if isinstance(value, str) else value
 
 # Register adapters/converters for datetime (required since Python 3.12)
 sqlite3.register_adapter(datetime, lambda dt: dt.strftime(_SQLITE_DT_FMT))
@@ -163,51 +183,20 @@ class Database:
         end_time: datetime,
         is_idle: bool = False,
         process_path: Optional[str] = None,
-        prevent_overlap: bool = True,
     ) -> int:
-        """Save a tracked activity to the database.
+        """Save an activity; it replaces whatever overlaps its time range.
 
-        Args:
-            prevent_overlap: If True (default), existing activities that
-                overlap the new time range are shortened or removed.
-                Set to False for imports that may legitimately run in
-                parallel to tracked activities (e.g. calendar events).
+        Existing activities are cut around the new range: the part before
+        it is kept, the part after it becomes its own row (same app, title
+        and project), and fully covered rows are removed. This keeps every
+        second of the day in exactly one activity.
         """
-        duration = int((end_time - start_time).total_seconds())
+        duration = _seconds_between(start_time, end_time)
 
         with self._write_lock:
             cursor = self.conn.cursor()
             try:
-                overlapping = []
-                if prevent_overlap:
-                    # Check for overlapping activities
-                    cursor.execute('''
-                        SELECT id, timestamp, duration
-                        FROM activities
-                        WHERE timestamp < ?
-                          AND datetime(timestamp, '+' || duration || ' seconds') > ?
-                    ''', (end_time.strftime(_SQLITE_DT_FMT), start_time.strftime(_SQLITE_DT_FMT)))
-
-                    overlapping = cursor.fetchall()
-
-                if overlapping:
-                    # Shorten overlapping activities to prevent overlap
-                    for overlap in overlapping:
-                        overlap_id = overlap[0]
-                        overlap_start = datetime.fromisoformat(overlap[1]) if isinstance(overlap[1], str) else overlap[1]
-
-                        # Calculate new duration to end when this activity starts
-                        new_duration = int((start_time - overlap_start).total_seconds())
-
-                        if new_duration > 0:
-                            cursor.execute('''
-                                UPDATE activities
-                                SET duration = ?
-                                WHERE id = ?
-                            ''', (new_duration, overlap_id))
-                        else:
-                            # Would result in 0 duration - delete it
-                            cursor.execute('DELETE FROM activities WHERE id = ?', (overlap_id,))
+                self._cut_overlapping_activities(cursor, start_time, end_time)
 
                 # Insert new activity
                 cursor.execute('''
@@ -222,9 +211,74 @@ class Database:
                 return int(activity_id) if activity_id else 0
 
             except sqlite3.IntegrityError:
-                # Duplicate activity - silently ignore
+                # Duplicate activity: undo the cuts made for it
+                self.conn.rollback()
                 cursor.close()
                 return 0
+
+    def _cut_overlapping_activities(
+        self, cursor, start_time: datetime, end_time: datetime
+    ) -> None:
+        """Remove the range [start_time, end_time) from existing activities.
+
+        Must be called with _write_lock held, inside the caller's
+        transaction. Overlaps up to OVERLAP_TOLERANCE_SECONDS are rounding
+        noise between consecutive activities and are left untouched.
+        """
+        cursor.execute('''
+            SELECT * FROM activities
+            WHERE timestamp >= ? AND timestamp < ?
+              AND (julianday(timestamp) - julianday(?)) * 86400 + duration > ?
+        ''', (
+            (start_time - OVERLAP_LOOKBACK).strftime(_SQLITE_DT_FMT),
+            end_time.strftime(_SQLITE_DT_FMT),
+            start_time.strftime(_SQLITE_DT_FMT),
+            OVERLAP_TOLERANCE_SECONDS,
+        ))
+
+        for row in cursor.fetchall():
+            existing = dict(row)
+            existing_start = _as_datetime(existing['timestamp'])
+            existing_end = existing_start + timedelta(seconds=existing['duration'])
+
+            seconds_before = _seconds_between(existing_start, start_time)
+            seconds_after = _seconds_between(end_time, existing_end)
+
+            if seconds_before > 0:
+                cursor.execute(
+                    'UPDATE activities SET duration = ? WHERE id = ?',
+                    (seconds_before, existing['id']),
+                )
+                if seconds_after > 0:
+                    self._insert_remainder(cursor, existing, end_time, seconds_after)
+            elif seconds_after > 0:
+                cursor.execute(
+                    'UPDATE activities SET timestamp = ?, duration = ? WHERE id = ?',
+                    (end_time.strftime(_SQLITE_DT_FMT), seconds_after, existing['id']),
+                )
+            else:
+                cursor.execute('DELETE FROM activities WHERE id = ?', (existing['id'],))
+
+    @staticmethod
+    def _insert_remainder(
+        cursor, existing: dict[str, Any], start_time: datetime, duration: int
+    ) -> None:
+        """Insert the tail of a split activity, keeping its attributes."""
+        cursor.execute('''
+            INSERT INTO activities
+                (timestamp, app_name, window_title, duration,
+                 category, project_id, is_idle, process_path)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            start_time.strftime(_SQLITE_DT_FMT),
+            existing['app_name'],
+            existing['window_title'],
+            duration,
+            existing['category'],
+            existing['project_id'],
+            existing['is_idle'],
+            existing['process_path'],
+        ))
 
     def get_activities(
         self,

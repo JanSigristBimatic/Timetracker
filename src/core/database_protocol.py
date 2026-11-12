@@ -21,10 +21,9 @@ class DatabaseProtocol(Protocol):
         end_time: datetime,
         is_idle: bool = False,
         process_path: Optional[str] = None,
-        prevent_overlap: bool = True,
     ) -> int:
         """
-        Save a tracked activity to the database
+        Save an activity; overlapped parts of existing activities are cut out
 
         Args:
             app_name: Name of the application
@@ -33,7 +32,6 @@ class DatabaseProtocol(Protocol):
             end_time: End time of the activity
             is_idle: Whether the activity represents idle time
             process_path: Optional path to the process executable
-            prevent_overlap: Whether overlapping activities are shortened
 
         Returns:
             The ID of the saved activity

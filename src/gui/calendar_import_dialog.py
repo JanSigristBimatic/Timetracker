@@ -46,8 +46,8 @@ class CalendarImportDialog(QDialog):
         info = QLabel(
             "Termine aus einer ICS-Datei (Outlook/Google Kalender Export) "
             "als Aktivitäten übernehmen. Serientermine und ganztägige "
-            "Termine werden übersprungen. Importierte Termine können "
-            "parallel zu getrackter PC-Zeit liegen."
+            "Termine werden übersprungen. Ein Termin ersetzt die während "
+            "seiner Dauer erfasste PC-Zeit, damit nichts doppelt zählt."
         )
         info.setWordWrap(True)
         info.setProperty("class", "muted")
@@ -196,14 +196,13 @@ class CalendarImportDialog(QDialog):
 
             event = item.data(Qt.ItemDataRole.UserRole)
 
-            # Calendar events may overlap tracked PC time; never shorten
-            # existing activities because of an import
+            # A meeting replaces the PC time tracked during it, so the
+            # time is counted once and belongs to the meeting's project
             activity_id = self.database.save_activity(
                 app_name=CALENDAR_APP_NAME,
                 window_title=event['summary'],
                 start_time=event['start'],
                 end_time=event['end'],
-                prevent_overlap=False,
             )
 
             if activity_id:
