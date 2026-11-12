@@ -22,7 +22,7 @@ TimeTracker ist eine intelligente Zeiterfassungsanwendung, die automatisch verfo
 
 ## Screenshots
 
-![alt text](Printscreen.png)
+![TimeTracker Hauptfenster](screenshots/Printscreen.png)
 
 ## Systemanforderungen
 
@@ -123,14 +123,7 @@ Timetracker/
 │   │   ├── config.py                # Konfigurationsverwaltung
 │   │   ├── export.py                # Export-Funktionen
 │   │   ├── icon_cache.py            # Icon-Caching für Anwendungen
-│   │   ├── social_media_detector.py # Social Media Erkennung
-│   │   ├── smart_project_assigner.py # Intelligente Projektzuweisung
-│   │   └── daily_report_generator.py # Tagesbericht-Generator
-│   ├── models/
-│   │   ├── activity.py              # Activity Datenmodell
-│   │   └── project.py               # Project Datenmodell
-│   └── mcp_client/                  # MCP Client Integration
-│       └── client.py
+│   │   └── smart_project_assigner.py # Zuordnungsvorschläge aus der Historie
 ├── tests/                           # pytest Tests
 │   ├── conftest.py                  # Test-Fixtures
 │   └── test_*.py                    # Test-Module

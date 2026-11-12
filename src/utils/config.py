@@ -47,10 +47,6 @@ def get_ignored_window_titles():
         return {t.strip() for t in env_value.split(',') if t.strip()}
     return DEFAULT_IGNORED_WINDOW_TITLES.copy()
 
-# Load current settings
-IGNORED_PROCESSES = get_ignored_processes()
-IGNORED_WINDOW_TITLES = get_ignored_window_titles()
-
 def should_ignore_activity(app_name, window_title=''):
     """Check if an activity should be ignored"""
     # Get latest values from environment

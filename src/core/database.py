@@ -1,9 +1,10 @@
-import os
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
 from typing import Any, Optional
+
+from utils.config import get_database_path
 
 # SQLite-compatible datetime format (space separator, not 'T', with microseconds)
 _SQLITE_DT_FMT = '%Y-%m-%d %H:%M:%S.%f'
@@ -55,22 +56,7 @@ class Database:
             db_path: Optional custom database path. If None, uses default location
                     or DATABASE_PATH environment variable.
         """
-        # Determine database path
-        if db_path:
-            # Use provided path
-            final_db_path = Path(db_path)
-        else:
-            # Check environment variable first
-            env_db_path = os.getenv('DATABASE_PATH', '').strip()
-            if env_db_path:
-                final_db_path = Path(env_db_path)
-            else:
-                # Use default location
-                db_dir = Path.home() / '.timetracker'
-                db_dir.mkdir(exist_ok=True)
-                final_db_path = db_dir / 'timetracker.db'
-
-        # Ensure parent directory exists
+        final_db_path = Path(db_path or get_database_path())
         final_db_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Store the path for reference
@@ -423,27 +409,6 @@ class Database:
 
             self.conn.commit()
             cursor.close()
-
-    def assign_multiple_activities_to_project(self, activity_ids: list[int], project_id: int) -> int:
-        """Assign multiple activities to a project"""
-        if not activity_ids:
-            return 0
-
-        with self._write_lock:
-            cursor = self.conn.cursor()
-            placeholders = ','.join('?' * len(activity_ids))
-            cursor.execute(f'''
-                UPDATE activities
-                SET project_id = ?
-                WHERE id IN ({placeholders})
-            ''', [project_id] + activity_ids)
-
-            rows_affected = cursor.rowcount
-            self._touch_project_last_used(cursor, project_id)
-            self.conn.commit()
-            cursor.close()
-
-        return rows_affected
 
     def assign_activities_by_timerange(
         self, start_time: datetime, end_time: datetime, app_name: str, project_id: int

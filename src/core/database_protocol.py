@@ -101,21 +101,6 @@ class DatabaseProtocol(Protocol):
         """
         ...
 
-    def assign_multiple_activities_to_project(
-        self, activity_ids: list[int], project_id: int
-    ) -> int:
-        """
-        Assign multiple activities to a project
-
-        Args:
-            activity_ids: List of activity IDs
-            project_id: ID of the project
-
-        Returns:
-            Number of activities affected
-        """
-        ...
-
     def assign_activities_by_timerange(
         self,
         start_time: datetime,

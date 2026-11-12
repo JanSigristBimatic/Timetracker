@@ -114,17 +114,6 @@ class MockDatabase(DatabaseProtocol):
                     project["last_used"] = datetime.now()
                     break
 
-    def assign_multiple_activities_to_project(
-        self, activity_ids: list[int], project_id: int
-    ) -> int:
-        """Assign multiple activities to a project"""
-        count = 0
-        for activity in self.activities:
-            if activity["id"] in activity_ids:
-                activity["project_id"] = project_id
-                count += 1
-        return count
-
     def assign_activities_by_timerange(
         self, start_time: datetime, end_time: datetime, app_name: str, project_id: int
     ) -> int:
