@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import QMenu, QMessageBox, QRubberBand, QWidget
 
 from core.database_protocol import DatabaseProtocol
 from utils.activity_merger import merge_activities
-from utils.config import get_env_int, should_ignore_activity
+from utils.config import get_env_int
 from utils.icon_cache import IconCache
 from .theme import contrasting_text_color, get_theme
 
@@ -126,14 +126,10 @@ class TimelineWidget(QWidget):
         """Set activities to display, preserving the current selection."""
         selected_keys = {self._activity_key(a) for a in self.selected_activities}
 
-        # Filter out ignored processes
-        filtered = [
-            act for act in activities
-            if not should_ignore_activity(act['app_name'], act.get('window_title', ''))
-        ]
-
+        # The blacklist only applies while tracking. Hiding stored rows
+        # here would show time in the statistics that cannot be assigned.
         self.activities = merge_activities(
-            filtered,
+            activities,
             min_duration=self.min_activity_duration,
             merge_gap=self.merge_gap,
             project_merge_gap=self.project_merge_gap,
