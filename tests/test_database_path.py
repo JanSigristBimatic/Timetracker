@@ -132,8 +132,7 @@ class TestDatabasePath:
             assert project_id > 0
 
             projects = db.get_projects()
-            # Should have 2 projects: "Social Media" (auto-created) and "Test Project"
-            assert len(projects) == 2
+            assert len(projects) == 1
 
             # Verify the database file is at the custom location
             assert Path(custom_path).exists()

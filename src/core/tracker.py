@@ -7,7 +7,6 @@ from typing import Optional
 from core.database_protocol import DatabaseProtocol
 from utils.assignment_rules import AssignmentRulesEngine
 from utils.config import should_ignore_activity
-from utils.social_media_detector import SocialMediaDetector
 
 logger = logging.getLogger(__name__)
 
@@ -283,17 +282,8 @@ class ActivityTracker:
     def _auto_assign_project(
         self, activity_id: int, app_name: str, window_title: str
     ) -> None:
-        """Assign a freshly saved activity via rules or social media detection.
-
-        Deterministic user rules take precedence over the built-in
-        social media detector.
-        """
+        """Assign a freshly saved activity via the user's assignment rules."""
         project_id = self.rules_engine.match(app_name, window_title)
-
-        if project_id is None and SocialMediaDetector.is_social_media(
-            app_name, window_title
-        ):
-            project_id = self.database.get_social_media_project_id()
 
         if project_id is not None:
             self.database.assign_activity_to_project(

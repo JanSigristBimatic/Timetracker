@@ -202,3 +202,44 @@ class TestOverlapSplitting:
     def test_duration_is_rounded_not_truncated(self, db):
         db.save_activity("A.exe", "a", BASE, BASE + timedelta(seconds=4, milliseconds=900))
         assert db.get_activities()[0]["duration"] == 5
+
+
+class TestSocialMediaRuleMigration:
+    def _open(self, path):
+        from core.database import Database
+        return Database(db_path=str(path))
+
+    def test_existing_social_media_project_gets_editable_rules(self, tmp_path):
+        from utils.assignment_rules import AssignmentRulesEngine
+
+        db = self._open(tmp_path / "t.db")
+        db.close()
+        # Simulate a database created by an older version
+        import sqlite3
+        conn = sqlite3.connect(tmp_path / "t.db")
+        conn.execute("INSERT INTO projects (name, color) VALUES ('Social Media', '#e74c3c')")
+        conn.execute("DELETE FROM settings")
+        conn.commit()
+        conn.close()
+
+        db = self._open(tmp_path / "t.db")
+        engine = AssignmentRulesEngine(db)
+        social_id = next(p["id"] for p in db.get_projects() if p["name"] == "Social Media")
+
+        assert engine.match("chrome.exe", "Feed | LinkedIn") == social_id
+        assert engine.match("Discord.exe", "Server") == social_id
+        assert engine.match("chrome.exe", "x.com/someone/status/1") == social_id
+        assert engine.match("chrome.exe", "Website builder | wix.com") is None
+        assert engine.match("chrome.exe", "netflix.com/account") is None
+
+        rule_count = len(db.get_project_rules())
+        db.close()
+        db = self._open(tmp_path / "t.db")
+        assert len(db.get_project_rules()) == rule_count  # runs only once
+        db.close()
+
+    def test_no_social_media_project_is_created(self, tmp_path):
+        db = self._open(tmp_path / "t.db")
+        assert db.get_projects() == []
+        assert db.get_project_rules() == []
+        db.close()

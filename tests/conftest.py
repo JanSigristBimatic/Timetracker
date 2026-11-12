@@ -148,13 +148,6 @@ class MockDatabase(DatabaseProtocol):
         """Set setting value"""
         self.settings[key] = value
 
-    def get_social_media_project_id(self) -> int | None:
-        """Get the ID of the Social Media project"""
-        for project in self.projects:
-            if project["name"] == "Social Media":
-                return project["id"]
-        return None
-
     def get_recently_used_projects(self, limit: int = 10) -> list[dict[str, Any]]:
         """Get recently used projects"""
         # For mock, just return all projects up to limit

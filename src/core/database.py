@@ -12,6 +12,19 @@ _SQLITE_DT_FMT = '%Y-%m-%d %H:%M:%S.%f'
 # by up to half a second, which must not count as a real overlap.
 OVERLAP_TOLERANCE_SECONDS = 0.5
 
+SOCIAL_MEDIA_MIGRATION_KEY = 'migration_social_media_rules'
+
+# (field, match_type, pattern) seeded once for an existing Social Media project
+SOCIAL_MEDIA_RULES = [
+    *[('title', 'contains', keyword) for keyword in (
+        'facebook', 'twitter', 'instagram', 'linkedin', 'reddit', 'tiktok',
+        'youtube', 'snapchat', 'pinterest', 'whatsapp', 'telegram',
+        'discord', 'twitch',
+    )],
+    ('title', 'regex', r'(^|[^\w.-])x\.com'),
+    *[('app', 'contains', app) for app in ('discord', 'telegram', 'whatsapp')],
+]
+
 # Lower bound for the overlap search so it can use the timestamp index.
 # No single activity lasts longer than this.
 OVERLAP_LOOKBACK = timedelta(days=7)
@@ -155,9 +168,6 @@ class Database:
         # Run migrations
         self._run_migrations()
 
-        # Initialize Social Media project if it doesn't exist
-        self._initialize_social_media_project()
-
     def _run_migrations(self):
         """Run database migrations"""
         cursor = self.conn.cursor()
@@ -174,6 +184,31 @@ class Database:
                 self.conn.commit()
 
         cursor.close()
+
+        self._migrate_social_media_detector_to_rules()
+
+    def _migrate_social_media_detector_to_rules(self) -> None:
+        """Replace the former hard-coded social media detector by rules.
+
+        Runs once. If a 'Social Media' project exists, the detector's
+        keywords become ordinary rules the user can edit or delete in the
+        rules dialog. Existing rules keep precedence (lower id). The former
+        substring 'x.com' also matched wix.com or netflix.com, so it
+        becomes a regex that requires x.com to start a domain.
+        """
+        if self.get_setting(SOCIAL_MEDIA_MIGRATION_KEY):
+            return
+
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT id FROM projects WHERE name = ?', ('Social Media',))
+        row = cursor.fetchone()
+        cursor.close()
+
+        if row:
+            for field, match_type, pattern in SOCIAL_MEDIA_RULES:
+                self.create_project_rule(row[0], field, pattern, match_type)
+
+        self.set_setting(SOCIAL_MEDIA_MIGRATION_KEY, '1')
 
     def save_activity(
         self,
@@ -467,31 +502,6 @@ class Database:
 
             self.conn.commit()
             cursor.close()
-
-    def _initialize_social_media_project(self) -> None:
-        """Initialize the Social Media project if it doesn't exist"""
-        with self._write_lock:
-            cursor = self.conn.cursor()
-            cursor.execute('SELECT id FROM projects WHERE name = ?', ('Social Media',))
-            result = cursor.fetchone()
-
-            if not result:
-                cursor.execute('''
-                    INSERT INTO projects (name, color)
-                    VALUES (?, ?)
-                ''', ('Social Media', '#e74c3c'))
-                self.conn.commit()
-
-            cursor.close()
-
-    def get_social_media_project_id(self) -> Optional[int]:
-        """Get the ID of the Social Media project"""
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT id FROM projects WHERE name = ?', ('Social Media',))
-        result = cursor.fetchone()
-        cursor.close()
-
-        return result[0] if result else None
 
     def delete_activities_by_timerange(
         self, start_time: datetime, end_time: datetime, app_name: str

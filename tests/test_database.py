@@ -95,8 +95,7 @@ class TestDatabase:
         assert project_id > 0
 
         projects = temp_db.get_projects()
-        # Should have 2 projects: "Social Media" (auto-created) and "Test Project"
-        assert len(projects) == 2
+        assert len(projects) == 1
         # Find the test project
         test_project = next(p for p in projects if p["name"] == "Test Project")
         assert test_project["name"] == "Test Project"
